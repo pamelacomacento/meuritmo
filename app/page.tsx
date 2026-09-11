@@ -690,15 +690,15 @@ function BottomNav({
   );
 
   return (
-    <nav className="sticky bottom-0 z-30 mt-auto border-t border-[#e2ddd5] bg-[#fffdf9]/95 px-2 pb-2 pt-2 backdrop-blur">
+    <nav className="app-bottom-nav z-50 border-t border-[#e2ddd5] bg-[#fffdf9]/95 px-2 pb-2 pt-2 backdrop-blur">
       <div className="grid grid-cols-5 items-end">
-        {item("Hoje", "⌂")}
-        {item("Calendário", "▦")}
+        {item("Hoje", "☀️")}
+        {item("Calendário", "🗓️")}
         <button className="fab" onClick={onAdd}>
           ＋
         </button>
-        {item("Hábitos", "✓")}
-        {item("Mais", "•••")}
+        {item("Hábitos", "🌱")}
+        {item("Mais", "✨")}
       </div>
     </nav>
   );
@@ -712,11 +712,11 @@ function AddMenu({
   choose: (kind: TaskKind | "habit" | "idea") => void;
 }) {
   const options: { kind: TaskKind | "habit" | "idea"; icon: string; title: string; text: string }[] = [
-    { kind: "task", icon: "✓", title: "Tarefa", text: "Algo que você precisa fazer." },
-    { kind: "habit", icon: "↻", title: "Hábito", text: "Algo que se repete na sua rotina." },
-    { kind: "event", icon: "□", title: "Evento", text: "Um compromisso com data e horário." },
-    { kind: "birthday", icon: "☆", title: "Aniversário", text: "Volta automaticamente todos os anos." },
-    { kind: "idea", icon: "✦", title: "Ideia", text: "Guarde agora e organize depois." },
+    { kind: "task", icon: "✅", title: "Tarefa", text: "Algo que você precisa fazer." },
+    { kind: "habit", icon: "🌱", title: "Hábito", text: "Algo que se repete na sua rotina." },
+    { kind: "event", icon: "🗓️", title: "Evento", text: "Um compromisso com data e horário." },
+    { kind: "birthday", icon: "🎂", title: "Aniversário", text: "Volta automaticamente todos os anos." },
+    { kind: "idea", icon: "💡", title: "Ideia", text: "Guarde agora e organize depois." },
   ];
 
   return (
@@ -841,9 +841,9 @@ function Today({
 
         {!tasksToday.length && (
           <section className="soft-card p-4 text-center">
-            <div className="text-sm font-semibold">Nenhuma tarefa para hoje</div>
+            <div className="text-sm font-semibold">Nada pendente por aqui ✨</div>
             <p className="mt-1 text-xs text-[#7e8790]">
-              Seu dia está livre por enquanto.
+              Se aparecer vontade, dá até para encaixar algo leve que te faça bem.
             </p>
           </section>
         )}
@@ -946,7 +946,7 @@ function Today({
 
         {!habitsToday.length && (
           <section className="soft-card p-4 text-center">
-            <div className="text-sm font-semibold">Nenhum hábito para hoje</div>
+            <div className="text-sm font-semibold">Hoje está mais leve 🌿</div>
             <p className="mt-1 text-xs text-[#7e8790]">
               Só aparecem aqui os hábitos previstos para este dia.
             </p>
@@ -1087,7 +1087,7 @@ function CalendarView({
 
   return (
     <div>
-      <SectionTitle title="Calendário" subtitle="Veja o tempo antes de lotar o dia." />
+      <SectionTitle title="Calendário" subtitle="Veja seu tempo com mais leveza antes de lotar o dia." />
 
       <div className="segment mb-4">
         {(["Mês", "Semana", "Agenda"] as const).map((m) => (
@@ -1417,7 +1417,7 @@ function DayDetailSheet({
             <p className="mt-1 text-xs text-[#8c949c]">
               {total
                 ? `${total} ${total === 1 ? "item" : "itens"} neste dia`
-                : "Nenhum item neste dia"}
+                : "Dia livre por enquanto ✨"}
             </p>
           </div>
 
@@ -1445,7 +1445,7 @@ function DayDetailSheet({
 
         {!total && (
           <div className="rounded-2xl bg-[#f6f2ec] px-4 py-6 text-center text-sm text-[#8c949c]">
-            Dia livre por enquanto.
+            Nada marcado por enquanto. Pode ser descanso, respiro ou improviso bom.
           </div>
         )}
       </div>
@@ -1692,7 +1692,7 @@ function HabitsView({
     <div>
       <SectionTitle
         title="Hábitos"
-        subtitle="Consistência sem sequência punitiva."
+        subtitle="Consistência gentil, sem cobrança exagerada."
         action={
           <button
             onClick={() => setShowAdd(true)}
@@ -1797,9 +1797,9 @@ function HabitsView({
 
       {!visible.length && (
         <section className="soft-card p-4 text-center">
-          <div className="text-sm font-semibold">Nenhum hábito ainda</div>
+          <div className="text-sm font-semibold">Seus hábitos começam aqui 🌱</div>
           <p className="mt-1 text-xs text-[#7e8790]">
-            Crie algo que faça sentido para a sua rotina, mesmo que aconteça só uma vez por semana.
+            Crie algo simples, gostoso de manter e que combine com a tua rotina.
           </p>
         </section>
       )}
@@ -1902,13 +1902,13 @@ function MoreHub({
   convertIdea: (i: Idea) => void;
 }) {
   const items: [MoreTab, string][] = [
-    ["Ritmo", "◉"],
-    ["Tarefas", "☷"],
-    ["Eisenhower", "⊞"],
-    ["Foco", "◷"],
-    ["Contagens", "⌛"],
-    ["Ideias", "✦"],
-    ["Perfil", "○"],
+    ["Ritmo", "〰️"],
+    ["Tarefas", "✅"],
+    ["Eisenhower", "🧭"],
+    ["Foco", "🎯"],
+    ["Contagens", "⏳"],
+    ["Ideias", "💡"],
+    ["Perfil", "🙂"],
   ];
 
   return (
@@ -2096,9 +2096,9 @@ function StepsView({
   if (!withSteps.length) {
     return (
       <section className="soft-card p-4 text-center">
-        <div className="text-sm font-semibold">Nenhuma tarefa com etapas</div>
+        <div className="text-sm font-semibold">Nenhum processo por aqui ainda</div>
         <p className="mt-1 text-xs text-[#7e8790]">
-          Ao criar ou editar uma tarefa, use “+ Adicionar etapa” quando ela tiver um processo.
+          Quando uma tarefa tiver várias partes, use “+ Adicionar etapa” para organizar melhor.
         </p>
       </section>
     );
@@ -2194,7 +2194,7 @@ function Eisenhower({
     <div>
       <SectionTitle
         title="Matriz"
-        subtitle="Prioridade sem transformar tudo em incêndio."
+        subtitle="Prioridade sem transformar tudo em urgência dramática."
       />
       <div className="grid grid-cols-2 gap-2">
         {boxes.map((b) => (
@@ -2290,7 +2290,7 @@ function Countdowns({
     <div>
       <SectionTitle
         title="Contagens"
-        subtitle="Datas importantes sem ficar contando no calendário."
+        subtitle="Datas importantes para acompanhar sem pesar a cabeça."
       />
 
       <div className="grid grid-cols-2 gap-2">
@@ -2402,7 +2402,7 @@ function Ideas({
         <section className="soft-card mb-4 p-4 text-center">
           <div className="text-sm font-semibold">Guarde uma ideia antes que ela fuja</div>
           <p className="mt-1 text-xs text-[#7e8790]">
-            Ela pode ficar aqui sem data, sem pressão e sem virar tarefa ainda.
+            Ela pode descansar aqui sem pressão, até chegar a hora certa.
           </p>
           <button
             onClick={() => setCreating(true)}
@@ -3918,6 +3918,18 @@ function FocusSheet({
   );
 }
 
+const titleEmoji: Record<string, string> = {
+  "Calendário": "🗓️",
+  "Hábitos": "🌱",
+  "Ritmo": "〰️",
+  "Tarefas": "✅",
+  "Matriz": "🧭",
+  "Foco": "🎯",
+  "Contagens": "⏳",
+  "Ideias": "💡",
+  "Perfil": "🙂",
+};
+
 function SectionTitle({
   title,
   subtitle,
@@ -3927,10 +3939,18 @@ function SectionTitle({
   subtitle: string;
   action?: React.ReactNode;
 }) {
+  const emoji = titleEmoji[title];
+
   return (
     <div className="mb-5 flex items-start justify-between gap-3">
       <div>
-        <h1 className="text-[26px] font-semibold tracking-tight">{title}</h1>
+        <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/85 px-3 py-1 text-[10px] font-bold uppercase tracking-[.14em] text-[#8a93a0] shadow-sm ring-1 ring-[#ece3d7]">
+          <span>{emoji || "✦"}</span>
+          <span>{title}</span>
+        </div>
+        <h1 className="text-[26px] font-semibold tracking-tight text-[#22364a]">
+          {emoji ? `${emoji} ${title}` : title}
+        </h1>
         <p className="mt-1 text-xs leading-5 text-[#7e8790]">{subtitle}</p>
       </div>
       {action}
