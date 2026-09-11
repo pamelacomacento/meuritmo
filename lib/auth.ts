@@ -5,19 +5,25 @@ export async function ensureAnonymousUser() {
     data: { session },
   } = await supabase.auth.getSession();
 
-  if (session) {
-    console.log("USUARIO SUPABASE:", session.user.id);
+  if (session && !session.user.is_anonymous) {
     return session.user;
   }
 
-  const { data, error } = await supabase.auth.signInAnonymously();
-
-  if (error) {
-    console.error("Erro ao criar usuário anônimo:", error);
-    return null;
+  if (session?.user?.is_anonymous) {
+    await supabase.auth.signOut();
   }
 
-  console.log("USUARIO SUPABASE:", data.user?.id);
+  if (typeof window !== "undefined") {
+    window.location.replace("/login");
+  }
 
-  return data.user;
+  return null;
+}
+
+export async function signOutUser() {
+  await supabase.auth.signOut();
+
+  if (typeof window !== "undefined") {
+    window.location.replace("/login");
+  }
 }

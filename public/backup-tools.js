@@ -1,6 +1,7 @@
 (() => {
   const STORAGE_KEY = "meu-ritmo-v2.3";
   const WRAPPER_ID = "meu-ritmo-backup-tools";
+  const LOGOUT_ID = "meu-ritmo-logout-button";
 
   function getCurrentData() {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -136,12 +137,39 @@
     dangerButton.style.marginTop = "16px";
   }
 
-  const observer = new MutationObserver(injectBackupTools);
+  function injectLogout() {
+    if (document.getElementById(LOGOUT_ID)) return;
+
+    const headings = Array.from(document.querySelectorAll("h1"));
+    const profileTitle = headings.find((el) => el.textContent?.trim() === "Perfil");
+    if (!profileTitle) return;
+
+    const profileRoot = profileTitle.parentElement?.parentElement;
+    if (!profileRoot) return;
+
+    const button = makeButton("Sair da conta");
+    button.id = LOGOUT_ID;
+    button.style.marginTop = "16px";
+    button.style.borderColor = "#e8cfc8";
+    button.style.color = "#a1685d";
+    button.addEventListener("click", () => {
+      location.href = "/logout";
+    });
+
+    profileRoot.appendChild(button);
+  }
+
+  function injectAll() {
+    injectBackupTools();
+    injectLogout();
+  }
+
+  const observer = new MutationObserver(injectAll);
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", injectBackupTools);
+    document.addEventListener("DOMContentLoaded", injectAll);
   } else {
-    injectBackupTools();
+    injectAll();
   }
 })();
