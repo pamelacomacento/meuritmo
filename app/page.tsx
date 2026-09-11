@@ -8,7 +8,8 @@ import { supabase } from "../lib/supabase";
 type MainTab = "Hoje" | "Calendário" | "Hábitos" | "Mais";
 type MoreTab = "Ritmo" | "Tarefas" | "Eisenhower" | "Foco" | "Contagens" | "Ideias" | "Perfil";
 type Priority = 0 | 1 | 2 | 3;
-type Recurrence = "none" | "daily" | "weekly" | "monthly" | "custom";
+type Recurrence = "none" | "daily" | "weekly" | "monthly" | "yearly" | "custom";
+type TaskKind = "task" | "event" | "birthday";
 type HabitFrequency = "daily" | "weekly" | "monthly" | "custom";
 type DayPeriod = "Manhã" | "Tarde" | "Noite" | "Outro";
 
@@ -22,6 +23,7 @@ type Step = { id: string; text: string; done: boolean };
 
 type Task = {
   id: string;
+  kind: TaskKind;
   title: string;
   notes: string;
   date: string;
@@ -119,10 +121,68 @@ const catColor = (defs: CategoryDef[], name: string) =>
   defs.find((c) => c.name === name)?.color || "#8b939b";
 const catBg = (defs: CategoryDef[], name: string) => `${catColor(defs, name)}20`;
 const firstCategory = (state: AppState) => state.categories[0]?.name || "Pessoal";
+const timeSortValue = (time?: string) => {
+  if (!time) return 24 * 60 + 1;
+  const [h, m] = time.split(":").map(Number);
+  return (Number.isFinite(h) ? h : 24) * 60 + (Number.isFinite(m) ? m : 0);
+};
+
 const durationLabel = (minutes: number) => {
   if (minutes < 60) return `${minutes} min`;
   if (minutes % 60 === 0) return `${minutes / 60}h`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
+};
+const taskKindLabel = (kind: TaskKind) =>
+  kind === "event" ? "Evento" : kind === "birthday" ? "Aniversário" : "Tarefa";
+const taskOccursOnDate = (task: Task, date: string) => {
+  if (task.kind === "birthday" || task.recurring === "yearly") {
+    return task.date.slice(5) === date.slice(5);
+  }
+  return task.date === date;
+};
+const timeRangeLabel = (task: Task) => {
+  if (!task.start) return "Sem horário";
+  if (!task.minutes || task.minutes <= 0) return task.start;
+  const [hh, mm] = task.start.split(":").map(Number);
+  const total = hh * 60 + mm + task.minutes;
+  const endH = Math.floor((total % (24 * 60)) / 60);
+  const endM = total % 60;
+  return `${task.start}–${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+};
+const habitOccursOnDate = (habit: Habit, date: string) => {
+  if (habit.archived) return false;
+  if (habit.startDate && date < habit.startDate) return false;
+  if (habit.endDate && date > habit.endDate) return false;
+
+  const d = new Date(`${date}T12:00:00`);
+  const dayIndex = d.getDay();
+
+  if (habit.frequency === "daily") return true;
+  if (habit.frequency === "weekly" || habit.frequency === "custom") {
+    return habit.days.includes(dayIndex);
+  }
+  if (habit.frequency === "monthly") {
+    const startDay = new Date(`${habit.startDate}T12:00:00`).getDate();
+    return d.getDate() === startDay;
+  }
+  return false;
+};
+const habitTimeRangeLabel = (habit: Habit) => {
+  if (!habit.time) return "Sem horário";
+  if (!habit.minutes || habit.minutes <= 0) return habit.time;
+  const [hh, mm] = habit.time.split(":").map(Number);
+  const total = hh * 60 + mm + habit.minutes;
+  const endH = Math.floor((total % (24 * 60)) / 60);
+  const endM = total % 60;
+  return `${habit.time}–${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+};
+const habitQuickAmounts = (habit: Habit) => {
+  const unit = habit.unit.trim().toLowerCase();
+  if (unit === "ml" || unit.includes("mililit")) return [200, 300, 500];
+  if (unit === "l" || unit.includes("litro")) return [0.2, 0.3, 0.5];
+  if (habit.goal <= 1) return [1];
+  if (habit.goal <= 10) return [1, 2, 5];
+  return [1, 5, 10];
 };
 const WEEKDAYS = [
   { n: 0, label: "dom" },
@@ -160,9 +220,10 @@ function migrateState(raw: any): AppState {
     tasks: Array.isArray(raw?.tasks)
       ? raw.tasks.map((t: any) => ({
           ...t,
+          kind: t.kind || "task",
           category: t.category || fallbackCategory,
           project: t.project || "",
-          recurring: t.recurring || "none",
+          recurring: t.kind === "birthday" ? "yearly" : t.recurring || "none",
           recurrenceDays: Array.isArray(t.recurrenceDays) ? t.recurrenceDays : [],
           recurrenceEnd: t.recurrenceEnd || "",
           reminder: t.reminder || "none",
@@ -208,6 +269,10 @@ export default function Home() {
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [taskInitial, setTaskInitial] = useState<Partial<Task> | null>(null);
   const [sourceIdeaId, setSourceIdeaId] = useState<string | null>(null);
+  const [addMenu, setAddMenu] = useState(false);
+  const [globalHabitComposer, setGlobalHabitComposer] = useState(false);
+  const [globalEditHabit, setGlobalEditHabit] = useState<Habit | null>(null);
+  const [globalIdeaComposer, setGlobalIdeaComposer] = useState(false);
 
   const [focusTask, setFocusTask] = useState<Task | null>(null);
   const [focusSecs, setFocusSecs] = useState(0);
@@ -362,11 +427,12 @@ export default function Home() {
 
   const openIdeaAsTask = (idea: Idea) => {
     setTaskInitial({
+      kind: "task",
       title: idea.title,
       notes: idea.note,
       category: idea.category,
       tags: idea.tags,
-      minutes: 30,
+      minutes: 0,
       date: iso(),
       priority: 1,
       recurring: "none",
@@ -410,6 +476,7 @@ export default function Home() {
                 state={state}
                 toggleTask={toggleTask}
                 edit={setEditTask}
+                editHabit={setGlobalEditHabit}
               />
             )}
 
@@ -434,11 +501,7 @@ export default function Home() {
           <BottomNav
             tab={tab}
             setTab={setTab}
-            onAdd={() => {
-              setTaskInitial(null);
-              setSourceIdeaId(null);
-              setComposer(true);
-            }}
+            onAdd={() => setAddMenu(true)}
           />
         </section>
       </div>
@@ -467,6 +530,79 @@ export default function Home() {
           remove={() => {
             deleteTask(editTask.id);
             setEditTask(null);
+          }}
+        />
+      )}
+
+      {addMenu && (
+        <AddMenu
+          close={() => setAddMenu(false)}
+          choose={(kind) => {
+            setAddMenu(false);
+            if (kind === "habit") {
+              setGlobalHabitComposer(true);
+              return;
+            }
+            if (kind === "idea") {
+              setGlobalIdeaComposer(true);
+              return;
+            }
+            setSourceIdeaId(null);
+            setTaskInitial({
+              kind,
+              date: iso(),
+              minutes: 0,
+              priority: kind === "task" ? 1 : 0,
+              recurring: kind === "birthday" ? "yearly" : "none",
+              recurrenceDays: [],
+              reminder: "none",
+              steps: [],
+            });
+            setComposer(true);
+          }}
+        />
+      )}
+
+      {globalHabitComposer && (
+        <HabitComposer
+          state={state}
+          close={() => setGlobalHabitComposer(false)}
+          save={(h) => {
+            setState((x) => ({ ...x, habits: [...x.habits, h] }));
+            setGlobalHabitComposer(false);
+          }}
+        />
+      )}
+
+      {globalEditHabit && (
+        <HabitComposer
+          state={state}
+          habit={globalEditHabit}
+          close={() => setGlobalEditHabit(null)}
+          save={(h) => {
+            setState((x) => ({
+              ...x,
+              habits: x.habits.map((item) => (item.id === h.id ? h : item)),
+            }));
+            setGlobalEditHabit(null);
+          }}
+          remove={() => {
+            setState((x) => ({
+              ...x,
+              habits: x.habits.filter((item) => item.id !== globalEditHabit.id),
+            }));
+            setGlobalEditHabit(null);
+          }}
+        />
+      )}
+
+      {globalIdeaComposer && (
+        <IdeaComposer
+          state={state}
+          close={() => setGlobalIdeaComposer(false)}
+          save={(idea) => {
+            setState((x) => ({ ...x, ideas: [...x.ideas, idea] }));
+            setGlobalIdeaComposer(false);
           }}
         />
       )}
@@ -568,6 +704,53 @@ function BottomNav({
   );
 }
 
+function AddMenu({
+  close,
+  choose,
+}: {
+  close: () => void;
+  choose: (kind: TaskKind | "habit" | "idea") => void;
+}) {
+  const options: { kind: TaskKind | "habit" | "idea"; icon: string; title: string; text: string }[] = [
+    { kind: "task", icon: "✓", title: "Tarefa", text: "Algo que você precisa fazer." },
+    { kind: "habit", icon: "↻", title: "Hábito", text: "Algo que se repete na sua rotina." },
+    { kind: "event", icon: "□", title: "Evento", text: "Um compromisso com data e horário." },
+    { kind: "birthday", icon: "☆", title: "Aniversário", text: "Volta automaticamente todos os anos." },
+    { kind: "idea", icon: "✦", title: "Ideia", text: "Guarde agora e organize depois." },
+  ];
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+      <div className="sheet">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <strong>O que você quer adicionar?</strong>
+            <p className="mt-1 text-xs text-[#87909a]">Escolha o tipo para abrir o formulário certo.</p>
+          </div>
+          <button onClick={close} className="text-xl">×</button>
+        </div>
+        <div className="space-y-2">
+          {options.map((option) => (
+            <button
+              key={option.kind}
+              onClick={() => choose(option.kind)}
+              className="flex w-full items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3 text-left"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#f4efe8] text-base font-bold">
+                {option.icon}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold">{option.title}</span>
+                <span className="mt-0.5 block text-xs text-[#87909a]">{option.text}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Today({
   state,
   toggleTask,
@@ -579,7 +762,7 @@ function Today({
 }) {
   const today = iso();
   const tasksToday = [...state.tasks]
-    .filter((t) => t.date === today)
+    .filter((t) => taskOccursOnDate(t, today))
     .sort((a, b) => {
       if (a.done !== b.done) return Number(a.done) - Number(b.done);
       if (a.start && b.start) return a.start.localeCompare(b.start);
@@ -606,7 +789,8 @@ function Today({
     })
     .sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
 
-  const completedTasks = tasksToday.filter((t) => t.done).length;
+  const actionableTasks = tasksToday.filter((t) => t.kind === "task");
+  const completedTasks = actionableTasks.filter((t) => t.done).length;
   const completedHabits = habitsToday.filter(
     (h) => (h.logs[today] || 0) >= h.goal
   ).length;
@@ -636,10 +820,10 @@ function Today({
       <section className="mb-5">
         <div className="mb-2 flex items-center justify-between">
           <div className="text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">
-            Tarefas
+            Tarefas e eventos
           </div>
           <span className="text-[11px] text-[#88919b]">
-            {completedTasks}/{tasksToday.length}
+            {completedTasks}/{actionableTasks.length}
           </span>
         </div>
 
@@ -679,6 +863,30 @@ function Today({
           {habitsToday.map((h) => {
             const current = h.logs[today] || 0;
             const done = current >= h.goal;
+            const quantitative = h.goal > 1 || h.unit.trim().toLowerCase() !== "vez";
+
+            const setValue = (value: number) =>
+              window.dispatchEvent(
+                new CustomEvent("meu-ritmo-toggle-habit", {
+                  detail: { id: h.id, value: Math.max(0, value), date: today },
+                })
+              );
+
+            const register = () => {
+              if (!quantitative) {
+                setValue(done ? 0 : h.goal);
+                return;
+              }
+
+              const raw = window.prompt(
+                `Quanto deseja registrar em ${h.unit}?`,
+                ""
+              );
+              if (!raw) return;
+              const amount = Number(raw.replace(",", "."));
+              if (!Number.isFinite(amount) || amount <= 0) return;
+              setValue(current + amount);
+            };
 
             return (
               <div
@@ -686,14 +894,10 @@ function Today({
                 className="flex items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3"
               >
                 <button
-                  onClick={() =>
-                    state &&
-                    (state as any) &&
-                    null
-                  }
+                  onClick={() => !quantitative && setValue(done ? 0 : h.goal)}
                   className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
                     done ? "bg-[#24364b] text-white" : ""
-                  }`}
+                  } ${quantitative ? "cursor-default" : ""}`}
                 >
                   {done ? "✓" : ""}
                 </button>
@@ -701,31 +905,39 @@ function Today({
                 <div className="min-w-0 flex-1">
                   <div
                     className={`truncate text-sm font-semibold ${
-                      done ? "line-through text-[#9aa1a8]" : ""
+                      done && !quantitative ? "line-through text-[#9aa1a8]" : ""
                     }`}
                   >
                     {h.title}
                   </div>
                   <div className="mt-1 text-[11px] text-[#88919b]">
-                    Hábito
+                    {quantitative
+                      ? `${current} / ${h.goal} ${h.unit}`
+                      : "Hábito"}
                     {h.time ? ` · ${h.time}` : ""}
                     {h.minutes ? ` · ${durationLabel(h.minutes)}` : ""}
                   </div>
+                  {quantitative && (
+                    <div className="mt-2 progressbar">
+                      <div
+                        style={{
+                          width: `${Math.min(100, (current / Math.max(h.goal, 1)) * 100)}%`,
+                          background: catColor(state.categories, h.category),
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <button
-                  onClick={() => {
-                    const nextValue = done ? 0 : h.goal;
-                    // local state is updated through the same state object used by the app
-                    window.dispatchEvent(
-                      new CustomEvent("meu-ritmo-toggle-habit", {
-                        detail: { id: h.id, value: nextValue, date: today },
-                      })
-                    );
-                  }}
-                  className="rounded-xl border border-[#ddd7cf] px-3 py-2 text-[11px] font-bold"
+                  onClick={register}
+                  className={`shrink-0 rounded-xl px-3 py-2 text-[11px] font-bold ${
+                    done && !quantitative
+                      ? "border border-[#ddd7cf] bg-white text-[#68737e]"
+                      : "bg-[#24364b] text-white"
+                  }`}
                 >
-                  {done ? "Desmarcar" : "Concluir"}
+                  {quantitative ? "+ registrar" : done ? "Desmarcar" : "Concluir"}
                 </button>
               </div>
             );
@@ -789,28 +1001,37 @@ function TaskRow({
   toggle: (id: string) => void;
   edit: (t: Task) => void;
 }) {
+  const actionable = task.kind === "task";
+  const icon = task.kind === "birthday" ? "☆" : task.kind === "event" ? "□" : "";
+
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3">
-      <button
-        onClick={() => toggle(task.id)}
-        className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
-          task.done ? "bg-[#24364b] text-white" : ""
-        }`}
-      >
-        {task.done ? "✓" : ""}
-      </button>
+      {actionable ? (
+        <button
+          onClick={() => toggle(task.id)}
+          className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
+            task.done ? "bg-[#24364b] text-white" : ""
+          }`}
+        >
+          {task.done ? "✓" : ""}
+        </button>
+      ) : (
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#f4efe8] text-xs font-bold">
+          {icon}
+        </span>
+      )}
       <button onClick={() => edit(task)} className="min-w-0 flex-1 text-left">
         <div
           className={`truncate text-sm font-semibold ${
-            task.done ? "line-through text-[#9aa1a8]" : ""
+            actionable && task.done ? "line-through text-[#9aa1a8]" : ""
           }`}
         >
           {task.title}
         </div>
         <div className="mt-1 text-[11px] text-[#88919b]">
-          {task.category}
-          {task.minutes > 0 ? ` · ${durationLabel(task.minutes)}` : ""}
-          {task.start ? ` · ${task.start}` : ""}
+          {taskKindLabel(task.kind)} · {task.category}
+          {task.start ? ` · ${timeRangeLabel(task)}` : ""}
+          {!task.start && task.minutes > 0 ? ` · ${durationLabel(task.minutes)}` : ""}
           {task.steps.length ? ` · ${task.steps.filter((s) => s.done).length}/${task.steps.length} etapas` : ""}
         </div>
       </button>
@@ -853,13 +1074,16 @@ function CalendarView({
   state,
   toggleTask,
   edit,
+  editHabit,
 }: {
   state: AppState;
   toggleTask: (id: string) => void;
   edit: (t: Task) => void;
+  editHabit: (h: Habit) => void;
 }) {
   const [mode, setMode] = useState<"Mês" | "Semana" | "Agenda">("Mês");
   const [cursor, setCursor] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   return (
     <div>
@@ -894,15 +1118,31 @@ function CalendarView({
       </div>
 
       {mode === "Mês" ? (
-        <MonthGrid state={state} cursor={cursor} edit={edit} />
+        <MonthGrid
+          state={state}
+          cursor={cursor}
+          onSelectDate={setSelectedDay}
+        />
       ) : mode === "Semana" ? (
-        <WeekGrid state={state} cursor={cursor} edit={edit} />
+        <WeekGrid state={state} cursor={cursor} edit={edit} editHabit={editHabit} />
       ) : (
         <Agenda
           state={state}
           cursor={cursor}
           toggle={toggleTask}
           edit={edit}
+          editHabit={editHabit}
+        />
+      )}
+
+      {selectedDay && (
+        <DayDetailSheet
+          state={state}
+          date={selectedDay}
+          toggle={toggleTask}
+          edit={edit}
+          editHabit={editHabit}
+          close={() => setSelectedDay(null)}
         />
       )}
     </div>
@@ -934,11 +1174,11 @@ function calendarLabel(d: Date, mode: string) {
 function MonthGrid({
   state,
   cursor,
-  edit,
+  onSelectDate,
 }: {
   state: AppState;
   cursor: Date;
-  edit: (t: Task) => void;
+  onSelectDate: (date: string) => void;
 }) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const start = new Date(first);
@@ -956,38 +1196,258 @@ function MonthGrid({
           <div key={i}>{x}</div>
         ))}
       </div>
+
       <div className="grid grid-cols-7 gap-1">
         {days.map((d) => {
           const ds = iso(d);
-          const list = state.tasks.filter((t) => t.date === ds);
+          const tasks = state.tasks.filter((t) => taskOccursOnDate(t, ds));
+          const habits = state.habits.filter((h) => habitOccursOnDate(h, ds));
+          const items = [
+            ...tasks.map((t) => ({ type: "task" as const, item: t })),
+            ...habits.map((h) => ({ type: "habit" as const, item: h })),
+          ];
           const dim = d.getMonth() !== cursor.getMonth();
+
           return (
-            <div
+            <button
               key={ds}
-              className={`min-h-[70px] rounded-xl border p-1.5 ${
+              type="button"
+              onClick={() => onSelectDate(ds)}
+              className={`min-h-[70px] rounded-xl border p-1.5 text-left transition active:scale-[.98] ${
                 ds === iso()
                   ? "border-[#24364b] bg-white"
                   : "border-[#e4dfd8] bg-[#fffefa]"
               } ${dim ? "opacity-35" : ""}`}
+              aria-label={`Abrir ${new Intl.DateTimeFormat("pt-BR", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              }).format(d)}`}
             >
               <div className="text-[10px] font-bold">{d.getDate()}</div>
-              <div className="mt-1 space-y-1">
-                {list.slice(0, 3).map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => edit(t)}
-                    className="block h-1.5 w-full rounded-full"
+
+              <div className="pointer-events-none mt-1 space-y-1">
+                {items.slice(0, 4).map(({ type, item }) => (
+                  <div
+                    key={`${type}-${item.id}`}
+                    className={`block h-1.5 w-full rounded-full ${
+                      type === "habit" ? "opacity-60" : ""
+                    }`}
                     style={{
-                      background: catColor(state.categories, t.category),
-                      opacity: t.done ? 0.35 : 1,
+                      background: catColor(state.categories, item.category),
+                      opacity:
+                        type === "task" && (item as Task).done ? 0.35 : undefined,
                     }}
-                    title={t.title}
                   />
                 ))}
+
+                {items.length > 4 && (
+                  <div className="text-[8px] font-bold text-[#9299a0]">
+                    +{items.length - 4}
+                  </div>
+                )}
               </div>
-            </div>
+            </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function DayDetailSheet({
+  state,
+  date,
+  toggle,
+  edit,
+  editHabit,
+  close,
+}: {
+  state: AppState;
+  date: string;
+  toggle: (id: string) => void;
+  edit: (t: Task) => void;
+  editHabit: (h: Habit) => void;
+  close: () => void;
+}) {
+  const d = new Date(`${date}T12:00:00`);
+
+  const tasks = state.tasks.filter((t) => taskOccursOnDate(t, date));
+  const habits = state.habits.filter((h) => habitOccursOnDate(h, date));
+
+  const items = [
+    ...tasks.map((t) => ({
+      type: "task" as const,
+      id: `task-${t.id}`,
+      time: t.start || "",
+      task: t,
+    })),
+    ...habits.map((h) => ({
+      type: "habit" as const,
+      id: `habit-${h.id}`,
+      time: h.time || "",
+      habit: h,
+    })),
+  ].sort((a, b) => timeSortValue(a.time) - timeSortValue(b.time));
+
+  const timedItems = items.filter((item) => item.time);
+  const untimedItems = items.filter((item) => !item.time);
+  const total = items.length;
+
+  const renderItem = (item: (typeof items)[number]) => {
+    if (item.type === "task") {
+      const t = item.task;
+
+      return (
+        <div
+          key={item.id}
+          className="flex items-center gap-3 rounded-2xl border border-[#e7e0d8] bg-[#fffefa] p-3"
+        >
+          {t.kind === "task" ? (
+            <button
+              onClick={() => toggle(t.id)}
+              className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs ${
+                t.done
+                  ? "border-[#24364b] bg-[#24364b] text-white"
+                  : "border-[#d7d1c8] bg-white"
+              }`}
+              aria-label={t.done ? "Desmarcar tarefa" : "Concluir tarefa"}
+            >
+              {t.done ? "✓" : ""}
+            </button>
+          ) : (
+            <span
+              className="h-8 w-1 shrink-0 rounded-full"
+              style={{ background: catColor(state.categories, t.category) }}
+            />
+          )}
+
+          <button
+            onClick={() => {
+              close();
+              edit(t);
+            }}
+            className="min-w-0 flex-1 text-left"
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span
+                className={`truncate text-sm font-semibold ${
+                  t.kind === "task" && t.done ? "text-[#8c949c] line-through" : ""
+                }`}
+              >
+                {t.title}
+              </span>
+
+              {t.kind !== "task" && (
+                <span className="rounded-full bg-[#f4efe8] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
+                  {t.kind === "event" ? "evento" : "aniversário"}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-0.5 text-[10px] text-[#8c949c]">
+              {timeRangeLabel(t)}
+              {t.category ? ` · ${t.category}` : ""}
+            </div>
+          </button>
+        </div>
+      );
+    }
+
+    const h = item.habit;
+    const current = h.logs[date] || 0;
+    const quantitative =
+      h.goal > 1 || h.unit.trim().toLowerCase() !== "vez";
+
+    return (
+      <button
+        key={item.id}
+        onClick={() => {
+          close();
+          editHabit(h);
+        }}
+        className="flex w-full items-center gap-3 rounded-2xl border border-[#dfe6dd] bg-[#f7f9f5] p-3 text-left"
+      >
+        <span
+          className="h-8 w-1 shrink-0 rounded-full opacity-65"
+          style={{ background: catColor(state.categories, h.category) }}
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-semibold">{h.title}</span>
+            <span className="rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
+              hábito
+            </span>
+          </div>
+
+          <div className="mt-0.5 text-[10px] text-[#8c949c]">
+            {habitTimeRangeLabel(h)}
+            {quantitative
+              ? ` · ${current}/${h.goal} ${h.unit}`
+              : current >= h.goal
+              ? " · concluído"
+              : ""}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <div className="sheet">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-[.14em] text-[#8c949c]">
+              Visão do dia
+            </div>
+            <h2 className="mt-1 text-xl font-semibold capitalize">
+              {new Intl.DateTimeFormat("pt-BR", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+              }).format(d)}
+            </h2>
+            <p className="mt-1 text-xs text-[#8c949c]">
+              {total
+                ? `${total} ${total === 1 ? "item" : "itens"} neste dia`
+                : "Nenhum item neste dia"}
+            </p>
+          </div>
+
+          <button onClick={close} className="text-xl">
+            ×
+          </button>
+        </div>
+
+        {timedItems.length > 0 && (
+          <div className="space-y-2">
+            {timedItems.map(renderItem)}
+          </div>
+        )}
+
+        {untimedItems.length > 0 && (
+          <div className={timedItems.length ? "mt-5" : ""}>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#9aa0a6]">
+              Sem horário
+            </div>
+            <div className="space-y-2">
+              {untimedItems.map(renderItem)}
+            </div>
+          </div>
+        )}
+
+        {!total && (
+          <div className="rounded-2xl bg-[#f6f2ec] px-4 py-6 text-center text-sm text-[#8c949c]">
+            Dia livre por enquanto.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -997,10 +1457,12 @@ function WeekGrid({
   state,
   cursor,
   edit,
+  editHabit,
 }: {
   state: AppState;
   cursor: Date;
   edit: (t: Task) => void;
+  editHabit: (h: Habit) => void;
 }) {
   const start = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -1013,9 +1475,26 @@ function WeekGrid({
     <div className="space-y-2">
       {days.map((d) => {
         const ds = iso(d);
-        const list = state.tasks
-          .filter((t) => t.date === ds)
-          .sort((a, b) => (a.start || "99").localeCompare(b.start || "99"));
+        const tasks = state.tasks.filter((t) => taskOccursOnDate(t, ds));
+        const habits = state.habits.filter((h) => habitOccursOnDate(h, ds));
+
+        const items = [
+          ...tasks.map((item) => ({
+            type: "task" as const,
+            item,
+            time: item.start || "99:99",
+            minutes: item.minutes || 0,
+          })),
+          ...habits.map((item) => ({
+            type: "habit" as const,
+            item,
+            time: item.time || "99:99",
+            minutes: item.minutes || 0,
+          })),
+        ].sort((a, b) => a.time.localeCompare(b.time));
+
+        const occupiedMinutes = items.reduce((n, x) => n + x.minutes, 0);
+
         return (
           <section key={ds} className="card p-3">
             <div className="mb-2 flex items-center justify-between">
@@ -1026,26 +1505,47 @@ function WeekGrid({
                 }).format(d)}
               </strong>
               <span className="text-[10px] text-[#8c949c]">
-                {list.reduce((n, t) => n + t.minutes, 0)} min
+                {occupiedMinutes > 0 ? `${occupiedMinutes} min` : ""}
               </span>
             </div>
 
-            {list.length ? (
-              list.map((t) => (
+            {items.length ? (
+              items.map(({ type, item }) => (
                 <button
-                  key={t.id}
-                  onClick={() => edit(t)}
-                  className="mb-1 flex w-full items-center gap-2 rounded-xl bg-[#f8f4ee] p-2 text-left"
+                  key={`${type}-${item.id}`}
+                  onClick={() =>
+                    type === "task"
+                      ? edit(item as Task)
+                      : editHabit(item as Habit)
+                  }
+                  className={`mb-1 flex w-full items-center gap-2 rounded-xl p-2 text-left ${
+                    type === "habit" ? "bg-[#f4f6f2]" : "bg-[#f8f4ee]"
+                  }`}
                 >
                   <span
-                    className="h-7 w-1 rounded-full"
-                    style={{ background: catColor(state.categories, t.category) }}
+                    className={`h-7 w-1 rounded-full ${
+                      type === "habit" ? "opacity-65" : ""
+                    }`}
+                    style={{ background: catColor(state.categories, item.category) }}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-semibold">{t.title}</div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="truncate text-xs font-semibold">{item.title}</div>
+                      {type === "habit" && (
+                        <span className="rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
+                          hábito
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-[#8c949c]">
-                      {t.start || "Sem horário"}
-                      {t.minutes > 0 ? ` · ${durationLabel(t.minutes)}` : ""}
+                      {type === "task"
+                        ? timeRangeLabel(item as Task)
+                        : habitTimeRangeLabel(item as Habit)}
+                      {type === "habit" &&
+                      !(item as Habit).time &&
+                      (item as Habit).minutes
+                        ? ` · ${durationLabel((item as Habit).minutes || 0)}`
+                        : ""}
                     </div>
                   </div>
                 </button>
@@ -1065,11 +1565,13 @@ function Agenda({
   cursor,
   toggle,
   edit,
+  editHabit,
 }: {
   state: AppState;
   cursor: Date;
   toggle: (id: string) => void;
   edit: (t: Task) => void;
+  editHabit: (h: Habit) => void;
 }) {
   const days = Array.from({ length: 14 }, (_, i) => {
     const d = new Date(cursor);
@@ -1081,8 +1583,13 @@ function Agenda({
     <div className="space-y-4">
       {days.map((d) => {
         const ds = iso(d);
-        const list = state.tasks.filter((t) => t.date === ds);
-        if (!list.length) return null;
+        const tasks = state.tasks.filter((t) => taskOccursOnDate(t, ds));
+        const habits = state.habits
+          .filter((h) => habitOccursOnDate(h, ds))
+          .sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+
+        if (!tasks.length && !habits.length) return null;
+
         return (
           <div key={ds}>
             <div className="mb-2 text-[11px] font-bold uppercase tracking-[.14em] text-[#8c949c]">
@@ -1092,8 +1599,9 @@ function Agenda({
                 month: "short",
               }).format(d)}
             </div>
+
             <div className="space-y-2">
-              {list.map((t) => (
+              {tasks.map((t) => (
                 <TaskRow
                   key={t.id}
                   task={t}
@@ -1102,6 +1610,39 @@ function Agenda({
                   edit={edit}
                 />
               ))}
+
+              {habits.map((h) => {
+                const current = h.logs[ds] || 0;
+                const done = current >= h.goal;
+                return (
+                  <button
+                    key={h.id}
+                    onClick={() => editHabit(h)}
+                    className="flex w-full items-center gap-3 rounded-2xl border border-[#e0e5dd] bg-[#f7f9f5] p-3 text-left"
+                  >
+                    <span
+                      className="h-8 w-1 shrink-0 rounded-full opacity-65"
+                      style={{ background: catColor(state.categories, h.category) }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className="truncate text-sm font-semibold">{h.title}</div>
+                        <span className="rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
+                          hábito
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-[#8c949c]">
+                        {habitTimeRangeLabel(h)}
+                        {h.goal > 1 || h.unit.trim().toLowerCase() !== "vez"
+                          ? ` · ${current}/${h.goal} ${h.unit}`
+                          : done
+                          ? " · concluído"
+                          : ""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         );
@@ -1136,6 +1677,14 @@ function HabitsView({
           : x
       ),
     }));
+
+  const registerCustom = (h: Habit) => {
+    const raw = window.prompt(`Quanto deseja registrar em ${h.unit}?`, "");
+    if (!raw) return;
+    const amount = Number(raw.replace(",", "."));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    log(h, amount);
+  };
 
   const visible = state.habits.filter((h) => !h.archived);
 
@@ -1195,19 +1744,49 @@ function HabitsView({
                 />
               </div>
 
-              <div className="mt-4 flex gap-2">
-                <button
-                  onClick={() => log(h, -1)}
-                  className="flex-1 rounded-xl border border-[#ddd7cf] py-2 text-sm"
-                >
-                  −
-                </button>
-                <button
-                  onClick={() => log(h, 1)}
-                  className="flex-1 rounded-xl bg-[#24364b] py-2 text-sm font-bold text-white"
-                >
-                  + registrar
-                </button>
+              <div className="mt-4">
+                {h.goal > 1 || h.unit.trim().toLowerCase() !== "vez" ? (
+                  <>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {habitQuickAmounts(h).map((amount) => (
+                        <button
+                          key={amount}
+                          onClick={() => log(h, amount)}
+                          className="rounded-xl border border-[#ddd7cf] bg-white py-2 text-[11px] font-bold"
+                        >
+                          +{amount}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => registerCustom(h)}
+                        className="rounded-xl bg-[#24364b] py-2 text-[11px] font-bold text-white"
+                      >
+                        Outro
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => log(h, -habitQuickAmounts(h)[0])}
+                      className="mt-2 w-full rounded-xl border border-[#ddd7cf] py-2 text-[11px] font-bold text-[#68737e]"
+                    >
+                      Corrigir −{habitQuickAmounts(h)[0]} {h.unit}
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => log(h, -1)}
+                      className="flex-1 rounded-xl border border-[#ddd7cf] py-2 text-sm"
+                    >
+                      −
+                    </button>
+                    <button
+                      onClick={() => log(h, 1)}
+                      className="flex-1 rounded-xl bg-[#24364b] py-2 text-sm font-bold text-white"
+                    >
+                      + registrar
+                    </button>
+                  </div>
+                )}
               </div>
 
               <MiniHabitHistory h={h} defs={state.categories} />
@@ -1392,10 +1971,11 @@ function TasksHub({
   const [filter, setFilter] = useState("Todas");
 
   const filters = ["Todas", ...state.categories.map((c) => c.name)];
+  const taskItems = state.tasks.filter((t) => t.kind === "task");
   const data =
     filter === "Todas"
-      ? state.tasks
-      : state.tasks.filter((t) => t.category === filter);
+      ? taskItems
+      : taskItems.filter((t) => t.category === filter);
 
   return (
     <div>
@@ -1582,7 +2162,7 @@ function Eisenhower({
   state: AppState;
   edit: (t: Task) => void;
 }) {
-  const open = state.tasks.filter((t) => !t.done);
+  const open = state.tasks.filter((t) => t.kind === "task" && !t.done);
   const boxes = [
     {
       title: "Fazer agora",
@@ -1653,7 +2233,7 @@ function FocusHub({
   state: AppState;
   startFocus: (t: Task) => void;
 }) {
-  const open = state.tasks.filter((t) => !t.done).sort((a, b) => b.priority - a.priority);
+  const open = state.tasks.filter((t) => t.kind === "task" && !t.done).sort((a, b) => b.priority - a.priority);
 
   return (
     <div>
@@ -1912,8 +2492,8 @@ function Rhythm({ state }: { state: AppState }) {
   const [period, setPeriod] = useState<"Semana" | "Mês" | "Ano">("Semana");
   const { start, end, prevStart, prevEnd } = periodRange(period);
 
-  const done = state.tasks.filter((t) => t.done && between(t.date, start, end));
-  const prev = state.tasks.filter((t) => t.done && between(t.date, prevStart, prevEnd));
+  const done = state.tasks.filter((t) => t.kind === "task" && t.done && between(t.date, start, end));
+  const prev = state.tasks.filter((t) => t.kind === "task" && t.done && between(t.date, prevStart, prevEnd));
   const total = done.reduce((n, t) => n + t.minutes, 0);
 
   const byCat = state.categories.map((cat) => ({
@@ -2406,7 +2986,7 @@ function Profile({
       <section className="soft-card mt-4 p-4">
         <div className="text-sm font-semibold">Sobre seus dados</div>
         <p className="mt-2 text-xs leading-5 text-[#7e8790]">
-          Nesta versão, tarefas e preferências ainda ficam principalmente neste navegador.
+          Seus dados são sincronizados com sua conta e também ficam salvos localmente neste aparelho.
         </p>
         <button
           onClick={() => {
@@ -2439,6 +3019,7 @@ function TaskComposer({
 }) {
   const base = task || initial;
 
+  const [kind, setKind] = useState<TaskKind>(base?.kind || "task");
   const [title, setTitle] = useState(base?.title || "");
   const [notes, setNotes] = useState(base?.notes || "");
   const [date, setDate] = useState(base?.date || iso());
@@ -2471,16 +3052,16 @@ function TaskComposer({
   const initialMinutes = base?.minutes || 0;
   const initialDurationUnit = initialMinutes >= 60 && initialMinutes % 60 === 0 ? "h" : "min";
   const [durationUnit, setDurationUnit] = useState<"min" | "h">(initialDurationUnit);
-  const [durationValue, setDurationValue] = useState<number | "">(
+  const [durationValue, setDurationValue] = useState<number>(
     initialMinutes
       ? initialDurationUnit === "h"
         ? initialMinutes / 60
         : initialMinutes
-      : ""
+      : 0
   );
 
   const minutes =
-    durationValue === "" || Number(durationValue) <= 0
+    Number(durationValue) <= 0
       ? 0
       : durationUnit === "h"
       ? Math.max(1, Math.round(Number(durationValue) * 60))
@@ -2496,20 +3077,21 @@ function TaskComposer({
 
     save({
       id: task?.id || uid(),
+      kind,
       title: title.trim(),
       notes,
       date,
       start: start || undefined,
-      minutes,
+      minutes: kind === "birthday" ? 0 : minutes,
       category,
-      priority,
-      done: task?.done || false,
+      priority: kind === "task" ? priority : 0,
+      done: kind === "task" ? task?.done || false : false,
       tags: tags
         .split(",")
         .map((x) => x.trim())
         .filter(Boolean),
       project: project.trim() || undefined,
-      recurring,
+      recurring: kind === "birthday" ? "yearly" : recurring,
       recurrenceDays,
       recurrenceEnd: recurrenceEnd || undefined,
       reminder,
@@ -2526,20 +3108,40 @@ function TaskComposer({
     >
       <div className="sheet">
         <div className="mb-4 flex items-center justify-between">
-          <strong>{task ? "Editar tarefa" : "Nova tarefa"}</strong>
+          <strong>{task ? `Editar ${taskKindLabel(kind).toLowerCase()}` : `Novo ${taskKindLabel(kind).toLowerCase()}`}</strong>
           <button onClick={close} className="text-xl">
             ×
           </button>
         </div>
 
-        {initial && !task && (
+        {initial && !task && initial?.notes && (
           <div className="mb-3 rounded-xl bg-[#f6f2ec] px-3 py-2 text-[11px] text-[#6f7882]">
             Criando tarefa a partir de uma ideia
           </div>
         )}
 
+        <div className="segment mb-4">
+          {([
+            ["task", "Tarefa"],
+            ["event", "Evento"],
+            ["birthday", "Aniversário"],
+          ] as [TaskKind, string][]).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={kind === value ? "active" : ""}
+              onClick={() => {
+                setKind(value);
+                if (value === "birthday") setRecurring("yearly");
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
-          <span>Nome da tarefa</span>
+          <span>{kind === "birthday" ? "Nome da pessoa" : kind === "event" ? "Nome do evento" : "Nome da tarefa"}</span>
           <span className="text-[#6f7f92]">Obrigatório</span>
         </div>
 
@@ -2547,7 +3149,7 @@ function TaskComposer({
           autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="O que precisa ser feito?"
+          placeholder={kind === "birthday" ? "Ex.: Aniversário da Emily" : kind === "event" ? "Ex.: Vôlei" : "O que precisa ser feito?"}
           className="w-full rounded-2xl border border-[#ddd7cf] px-4 py-3 text-base font-semibold"
         />
 
@@ -2571,6 +3173,7 @@ function TaskComposer({
           </Field>
         </div>
 
+        {kind !== "birthday" && (
         <div className="mt-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="text-xs font-bold">Duração</div>
@@ -2579,11 +3182,11 @@ function TaskComposer({
           <div className="grid grid-cols-[1fr_120px] gap-2">
             <input
               type="number"
-              min="0.1"
+              min="0"
               step={durationUnit === "h" ? "0.5" : "5"}
               value={durationValue}
               onChange={(e) =>
-                setDurationValue(e.target.value === "" ? "" : Number(e.target.value))
+                setDurationValue(e.target.value === "" ? 0 : Number(e.target.value))
               }
               className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
             />
@@ -2621,7 +3224,7 @@ function TaskComposer({
               </button>
             ))}
           </div>
-        </div>
+        </div>        )}
 
         <div className="mt-3">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -2700,6 +3303,7 @@ function TaskComposer({
                 <option value="daily">Diariamente</option>
                 <option value="weekly">Semanalmente</option>
                 <option value="monthly">Mensalmente</option>
+                <option value="yearly">Anualmente</option>
                 <option value="custom">Personalizado</option>
               </select>
             </Field>
@@ -2848,7 +3452,7 @@ function TaskComposer({
             onClick={submit}
             className="flex-1 rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white"
           >
-            Salvar tarefa
+            Salvar {taskKindLabel(kind).toLowerCase()}
           </button>
         </div>
       </div>
@@ -2886,7 +3490,7 @@ function HabitComposer({
   const [reminder, setReminder] = useState(habit?.reminder || "none");
   const [archived, setArchived] = useState(habit?.archived || false);
 
-  const initialMinutes = habit?.minutes || 30;
+  const initialMinutes = habit?.minutes || 0;
   const initialDurationUnit = initialMinutes >= 60 && initialMinutes % 60 === 0 ? "h" : "min";
   const [durationUnit, setDurationUnit] = useState<"min" | "h">(initialDurationUnit);
   const [durationValue, setDurationValue] = useState(
@@ -2894,7 +3498,9 @@ function HabitComposer({
   );
 
   const minutes =
-    durationUnit === "h"
+    Number(durationValue) <= 0
+      ? 0
+      : durationUnit === "h"
       ? Math.max(1, Math.round(Number(durationValue) * 60))
       : Math.max(1, Math.round(Number(durationValue)));
 
@@ -2918,7 +3524,7 @@ function HabitComposer({
       unit: unit.trim() || "vez",
       logs: habit?.logs || {},
       time: time || undefined,
-      minutes,
+      minutes: minutes || undefined,
       period,
       startDate,
       endDate: endDate || undefined,
@@ -3033,7 +3639,7 @@ function HabitComposer({
           <div className="grid grid-cols-[1fr_120px] gap-2">
             <input
               type="number"
-              min="0.1"
+              min="0"
               step={durationUnit === "h" ? "0.5" : "5"}
               value={durationValue}
               onChange={(e) => setDurationValue(Number(e.target.value))}
