@@ -34,33 +34,10 @@ const between = (date:string, start:Date, end:Date) => { const d=new Date(`${dat
 
 const seed:AppState = {
   appName:"Meu Ritmo", userName:"Pâmela", accent:"#24364b",
-  tasks:[
-    {id:"t1",title:"Editar Reel da clínica",notes:"Finalizar cortes, legenda e exportação.",date:iso(),start:"19:30",minutes:35,category:"Profissional",priority:3,done:false,tags:["conteúdo"],list:"Trabalho",project:"Instagram Veterinária",recurring:"none",steps:[{id:"s1",text:"Selecionar cortes",done:true},{id:"s2",text:"Inserir legenda",done:false},{id:"s3",text:"Exportar",done:false}]},
-    {id:"t2",title:"Responder orçamento",notes:"",date:iso(),minutes:10,category:"Profissional",priority:3,done:false,tags:["rápida"],list:"Trabalho",recurring:"none",steps:[]},
-    {id:"t3",title:"Caminhada",notes:"",date:iso(),start:"18:00",minutes:30,category:"Saúde",priority:1,done:false,tags:[],list:"Pessoal",recurring:"daily",steps:[]},
-    {id:"t4",title:"Separar referências",notes:"",date:iso(),minutes:15,category:"Criatividade",priority:2,done:false,tags:["conteúdo"],list:"Ideias",recurring:"none",steps:[]},
-    {id:"t5",title:"Organizar arquivos",notes:"",date:iso(),minutes:20,category:"Casa",priority:1,done:true,tags:[],list:"Pessoal",recurring:"weekly",steps:[]},
-    {id:"h1",title:"Revisar apresentação",notes:"",date:offsetISO(-1),minutes:40,category:"Profissional",priority:2,done:true,tags:[],list:"Trabalho",recurring:"none",steps:[]},
-    {id:"h2",title:"Alongamento",notes:"",date:offsetISO(-1),minutes:15,category:"Saúde",priority:1,done:true,tags:[],list:"Pessoal",recurring:"none",steps:[]},
-    {id:"h3",title:"Ler por prazer",notes:"",date:offsetISO(-2),minutes:25,category:"Pessoal",priority:1,done:true,tags:["hobby"],list:"Quero fazer",recurring:"none",steps:[]},
-    {id:"h4",title:"Rascunhar ilustração",notes:"",date:offsetISO(-2),minutes:40,category:"Criatividade",priority:1,done:true,tags:["hobby"],list:"Quero fazer",recurring:"none",steps:[]},
-    {id:"h5",title:"Estudar referências",notes:"",date:offsetISO(-4),minutes:30,category:"Estudos",priority:1,done:true,tags:[],list:"Estudos",recurring:"none",steps:[]},
-    {id:"m1",title:"Consulta",notes:"",date:offsetISO(2),start:"14:00",minutes:60,category:"Pessoal",priority:3,done:false,tags:[],list:"Pessoal",recurring:"none",steps:[]},
-  ],
-  habits:[
-    {id:"hb1",title:"Beber água",category:"Saúde",goal:6,unit:"copos",days:[1,2,3,4,5,6,0],logs:{[iso()]:4,[offsetISO(-1)]:6,[offsetISO(-2)]:5}},
-    {id:"hb2",title:"Ler",category:"Pessoal",goal:20,unit:"min",days:[1,2,3,4,5,6,0],logs:{[offsetISO(-1)]:25,[offsetISO(-2)]:15}},
-    {id:"hb3",title:"Criar sem objetivo",category:"Criatividade",goal:15,unit:"min",days:[2,4,6],logs:{[offsetISO(-2)]:30}},
-  ],
-  ideas:[
-    {id:"i1",title:"O mínimo sobre vacinação",note:"Série de vídeos curtos com 3 pontos básicos.",category:"Profissional"},
-    {id:"i2",title:"Pintar uma tela pequena",note:"Sem transformar em projeto. Só por diversão.",category:"Criatividade"},
-    {id:"i3",title:"Organizar fotos antigas",note:"Fazer aos poucos em blocos de 20 min.",category:"Pessoal"},
-  ],
-  countdowns:[
-    {id:"c1",title:"Férias",date:offsetISO(38),category:"Pessoal"},
-    {id:"c2",title:"Entrega do projeto",date:offsetISO(9),category:"Profissional"},
-  ]
+  tasks:[],
+  habits:[],
+  ideas:[],
+  countdowns:[]
 };
 
 export default function Home(){
@@ -74,8 +51,8 @@ export default function Home(){
   const [focusSecs,setFocusSecs] = useState(0);
   const [running,setRunning] = useState(false);
 
-  useEffect(()=>{ const raw=localStorage.getItem("meu-ritmo-v2"); if(raw){try{setState(JSON.parse(raw));}catch{}} setHydrated(true); },[]);
-  useEffect(()=>{ if(hydrated) localStorage.setItem("meu-ritmo-v2",JSON.stringify(state)); },[state,hydrated]);
+  useEffect(()=>{ const raw=localStorage.getItem("meu-ritmo-v2.3"); if(raw){try{setState(JSON.parse(raw));}catch{}} setHydrated(true); },[]);
+  useEffect(()=>{ if(hydrated) localStorage.setItem("meu-ritmo-v2.3",JSON.stringify(state)); },[state,hydrated]);
   useEffect(()=>{ if(!running||focusSecs<=0)return; const x=setInterval(()=>setFocusSecs(s=>s-1),1000); return()=>clearInterval(x); },[running,focusSecs]);
   useEffect(()=>{ if(focusSecs===0) setRunning(false); },[focusSecs]);
 
@@ -187,7 +164,7 @@ function Rhythm({state}:{state:AppState}){ const [period,setPeriod]=useState<"Se
 function periodRange(p:"Semana"|"Mês"|"Ano"){ const now=new Date(); let start:Date,end:Date,prevStart:Date,prevEnd:Date; if(p==="Semana"){start=startOfWeek(now);end=new Date(start);end.setDate(start.getDate()+6);prevStart=new Date(start);prevStart.setDate(start.getDate()-7);prevEnd=new Date(start);prevEnd.setDate(start.getDate()-1);} else if(p==="Mês"){start=new Date(now.getFullYear(),now.getMonth(),1);end=new Date(now.getFullYear(),now.getMonth()+1,0);prevStart=new Date(now.getFullYear(),now.getMonth()-1,1);prevEnd=new Date(now.getFullYear(),now.getMonth(),0);} else {start=new Date(now.getFullYear(),0,1);end=new Date(now.getFullYear(),11,31);prevStart=new Date(now.getFullYear()-1,0,1);prevEnd=new Date(now.getFullYear()-1,11,31);} return {start,end,prevStart,prevEnd}; }
 function PeriodInsight({period,tasks}:{period:string;tasks:Task[]}){ const grouped=categories.map(c=>({c,min:tasks.filter(t=>t.category===c).reduce((n,t)=>n+t.minutes,0)})).sort((a,b)=>b.min-a.min); const high=grouped[0],low=[...grouped].reverse().find(x=>x.min>0)||grouped[grouped.length-1]; return <section className="soft-card p-4"><div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">Leitura do {period.toLowerCase()}</div>{tasks.length?<p className="mt-2 text-sm leading-5">Você colocou mais energia em <strong>{high.c}</strong>. {low&&low.c!==high.c?<>A área com menos presença foi <strong>{low.c}</strong>.</>:null} O objetivo não é deixar tudo igual, e sim perceber o padrão.</p>:<p className="mt-2 text-sm text-[#7e8790]">Ainda não há tarefas concluídas neste período.</p>}</section> }
 
-function Profile({state,setState}:{state:AppState;setState:any}){ const accents=["#24364b","#315f61","#5d6f91","#647b68","#785f79"]; return <div><SectionTitle title="Perfil" subtitle="Ajustes simples. O app deve se adaptar a você."/><section className="card p-4"><label className="text-xs font-bold">Seu nome</label><input value={state.userName} onChange={e=>setState((s:AppState)=>({...s,userName:e.target.value}))} className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"/><label className="mt-4 block text-xs font-bold">Nome do app</label><input value={state.appName} onChange={e=>setState((s:AppState)=>({...s,appName:e.target.value}))} className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"/><div className="mt-4 text-xs font-bold">Cor principal</div><div className="mt-2 flex gap-2">{accents.map(a=><button key={a} onClick={()=>setState((s:AppState)=>({...s,accent:a}))} className={`h-9 w-9 rounded-full ${state.accent===a?"ring-2 ring-offset-2 ring-[#24364b]":""}`} style={{background:a}}/>)}</div></section><section className="soft-card mt-4 p-4"><div className="text-sm font-semibold">Sobre seus dados</div><p className="mt-2 text-xs leading-5 text-[#7e8790]">Nesta versão, tudo fica salvo apenas neste navegador. Quando conectarmos ao Supabase, passa a sincronizar entre dispositivos.</p><button onClick={()=>{localStorage.removeItem("meu-ritmo-v2");location.reload();}} className="mt-4 text-xs font-bold text-[#a1685d]">Restaurar dados de exemplo</button></section></div> }
+function Profile({state,setState}:{state:AppState;setState:any}){ const accents=["#24364b","#315f61","#5d6f91","#647b68","#785f79"]; return <div><SectionTitle title="Perfil" subtitle="Ajustes simples. O app deve se adaptar a você."/><section className="card p-4"><label className="text-xs font-bold">Seu nome</label><input value={state.userName} onChange={e=>setState((s:AppState)=>({...s,userName:e.target.value}))} className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"/><label className="mt-4 block text-xs font-bold">Nome do app</label><input value={state.appName} onChange={e=>setState((s:AppState)=>({...s,appName:e.target.value}))} className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"/><div className="mt-4 text-xs font-bold">Cor principal</div><div className="mt-2 flex gap-2">{accents.map(a=><button key={a} onClick={()=>setState((s:AppState)=>({...s,accent:a}))} className={`h-9 w-9 rounded-full ${state.accent===a?"ring-2 ring-offset-2 ring-[#24364b]":""}`} style={{background:a}}/>)}</div></section><section className="soft-card mt-4 p-4"><div className="text-sm font-semibold">Sobre seus dados</div><p className="mt-2 text-xs leading-5 text-[#7e8790]">Nesta versão, tudo fica salvo apenas neste navegador. Quando conectarmos ao Supabase, passa a sincronizar entre dispositivos.</p><button onClick={()=>{localStorage.removeItem("meu-ritmo-v2.3");location.reload();}} className="mt-4 text-xs font-bold text-[#a1685d]">Limpar todos os dados</button></section></div> }
 
 function TaskComposer({task,close,save,remove}:{task?:Task;close:()=>void;save:(t:Task)=>void;remove?:()=>void}){
   const [title,setTitle]=useState(task?.title||""); const [notes,setNotes]=useState(task?.notes||""); const [date,setDate]=useState(task?.date||iso()); const [start,setStart]=useState(task?.start||""); const [minutes,setMinutes]=useState(task?.minutes||30); const [category,setCategory]=useState<Category>(task?.category||"Profissional"); const [priority,setPriority]=useState<Priority>(task?.priority||1); const [list,setList]=useState(task?.list||"Inbox"); const [tags,setTags]=useState(task?.tags.join(", ")||""); const [recurring,setRecurring]=useState<Task["recurring"]>(task?.recurring||"none"); const [steps,setSteps]=useState(task?.steps||[]); const [step,setStep]=useState("");
