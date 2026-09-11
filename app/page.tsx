@@ -409,10 +409,15 @@ export default function Home() {
   }, [hydrated, state.tasks]);
 
   const toggleTask = (id: string) =>
-    setState((s) => ({
-      ...s,
-      tasks: s.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
-    }));
+    setState((s) => {
+      const next = {
+        ...s,
+        tasks: s.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
+      };
+
+      localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(next));
+      return next;
+    });
 
   const deleteTask = (id: string) =>
     setState((s) => ({ ...s, tasks: s.tasks.filter((t) => t.id !== id) }));
@@ -846,6 +851,7 @@ function Today({
               defs={state.categories}
               toggle={toggleTask}
               edit={edit}
+              showCompleteAction
             />
           ))}
         </div>
@@ -1006,11 +1012,13 @@ function TaskRow({
   defs,
   toggle,
   edit,
+  showCompleteAction = false,
 }: {
   task: Task;
   defs: CategoryDef[];
   toggle: (id: string) => void;
   edit: (t: Task) => void;
+  showCompleteAction?: boolean;
 }) {
   const actionable = task.kind === "task";
   const icon = task.kind === "birthday" ? "☆" : task.kind === "event" ? "□" : "";
@@ -1019,8 +1027,9 @@ function TaskRow({
     <div className="flex items-center gap-3 rounded-2xl border border-[#E8DDD2] bg-white p-3">
       {actionable ? (
         <button
+          type="button"
           onClick={() => toggle(task.id)}
-          className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
+          className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs ${
             task.done ? "bg-[var(--app-accent)] text-white" : ""
           }`}
         >
@@ -1046,10 +1055,24 @@ function TaskRow({
           {task.steps.length ? ` · ${task.steps.filter((s) => s.done).length}/${task.steps.length} etapas` : ""}
         </div>
       </button>
-      <span
-        className="h-2.5 w-2.5 rounded-full"
-        style={{ background: catColor(defs, task.category) }}
-      />
+      {actionable && showCompleteAction ? (
+        <button
+          type="button"
+          onClick={() => toggle(task.id)}
+          className={`shrink-0 rounded-xl px-3 py-2 text-[11px] font-bold ${
+            task.done
+              ? "border border-[#E8DDD2] bg-white text-[#68737e]"
+              : "bg-[var(--app-accent)] text-white"
+          }`}
+        >
+          {task.done ? "Desmarcar" : "Concluir"}
+        </button>
+      ) : (
+        <span
+          className="h-2.5 w-2.5 rounded-full"
+          style={{ background: catColor(defs, task.category) }}
+        />
+      )}
     </div>
   );
 }
@@ -2667,26 +2690,46 @@ function Rhythm({ state }: { state: AppState }) {
   const [period, setPeriod] = useState<"Semana" | "Mês" | "Ano">("Semana");
   const { start, end, prevStart, prevEnd } = periodRange(period);
 
-  const done = state.tasks.filter((t) => t.kind === "task" && t.done && between(t.date, start, end));
-  const prev = state.tasks.filter((t) => t.kind === "task" && t.done && between(t.date, prevStart, prevEnd));
-  const total = done.reduce((n, t) => n + t.minutes, 0);
+  const tasks = state.tasks.filter(
+    (t) => t.kind === "task" && between(t.date, start, end)
+  );
+  const done = tasks.filter((t) => t.done);
 
-  const byCat = state.categories.map((cat) => ({
-    c: cat.name,
-    min: done
-      .filter((t) => t.category === cat.name)
-      .reduce((n, t) => n + t.minutes, 0),
-  }));
+  const prevTasks = state.tasks.filter(
+    (t) => t.kind === "task" && between(t.date, prevStart, prevEnd)
+  );
+  const prevDone = prevTasks.filter((t) => t.done);
 
-  const max = Math.max(1, ...byCat.map((x) => x.min));
-  const prevTotal = prev.reduce((n, t) => n + t.minutes, 0);
-  const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0;
+  const completion = tasks.length
+    ? Math.round((done.length / tasks.length) * 100)
+    : 0;
+
+  const prevCompletion = prevTasks.length
+    ? Math.round((prevDone.length / prevTasks.length) * 100)
+    : 0;
+
+  const delta = completion - prevCompletion;
+
+  const byCat = state.categories.map((cat) => {
+    const catTasks = tasks.filter((t) => t.category === cat.name);
+    const catDone = catTasks.filter((t) => t.done);
+    const pct = catTasks.length
+      ? Math.round((catDone.length / catTasks.length) * 100)
+      : 0;
+
+    return {
+      c: cat.name,
+      total: catTasks.length,
+      done: catDone.length,
+      pct,
+    };
+  });
 
   return (
     <div>
       <SectionTitle
         title="Seu ritmo"
-        subtitle="Mais do que quantidade: onde sua atenção foi parar."
+        subtitle="Veja quanto do que você planejou realmente conseguiu concluir."
       />
 
       <div className="segment mb-4">
@@ -2702,39 +2745,62 @@ function Rhythm({ state }: { state: AppState }) {
       </div>
 
       <section className="card mb-4 p-4">
-        <div className="flex items-end justify-between">
+        <div className="flex items-end justify-between gap-4">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">
-              Tempo investido
+              Tarefas concluídas
             </div>
             <div className="mt-1 text-3xl font-semibold">
-              {Math.floor(total / 60)}h {total % 60}m
+              {completion}%
+            </div>
+            <div className="mt-1 text-xs text-[#8b939b]">
+              {done.length} de {tasks.length} {tasks.length === 1 ? "tarefa" : "tarefas"}
             </div>
           </div>
+
           <div
             className={`text-xs font-bold ${
               delta >= 0 ? "text-[#6F8F7C]" : "text-[#B96F60]"
             }`}
           >
-            {delta >= 0 ? "+" : ""}
-            {delta}% vs anterior
+            {prevTasks.length ? (
+              <>
+                {delta >= 0 ? "+" : ""}
+                {delta} p.p. vs anterior
+              </>
+            ) : (
+              "Sem comparação anterior"
+            )}
           </div>
+        </div>
+
+        <div className="mt-4 progressbar">
+          <div
+            style={{
+              width: `${completion}%`,
+              background: "var(--app-accent)",
+            }}
+          />
         </div>
       </section>
 
       <section className="card mb-4 p-4">
-        <div className="mb-4 text-sm font-semibold">Pulso das áreas</div>
+        <div className="mb-4 text-sm font-semibold">Conclusão por área</div>
+
         <div className="space-y-4">
           {byCat.map((x) => (
             <div key={x.c}>
-              <div className="mb-1 flex justify-between text-xs">
+              <div className="mb-1 flex justify-between gap-3 text-xs">
                 <span className="font-semibold">{x.c}</span>
-                <span className="text-[#8b939b]">{x.min} min</span>
+                <span className="text-[#8b939b]">
+                  {x.total ? `${x.done}/${x.total} · ${x.pct}%` : "Sem tarefas"}
+                </span>
               </div>
+
               <div className="progressbar">
                 <div
                   style={{
-                    width: `${(x.min / max) * 100}%`,
+                    width: `${x.pct}%`,
                     background: catColor(state.categories, x.c),
                   }}
                 />
@@ -2744,7 +2810,7 @@ function Rhythm({ state }: { state: AppState }) {
         </div>
       </section>
 
-      <PeriodInsight period={period} state={state} tasks={done} />
+      <PeriodInsight period={period} state={state} tasks={tasks} />
     </div>
   );
 }
@@ -2786,17 +2852,24 @@ function PeriodInsight({
   tasks: Task[];
 }) {
   const grouped = state.categories
-    .map((cat) => ({
-      c: cat.name,
-      min: tasks
-        .filter((t) => t.category === cat.name)
-        .reduce((n, t) => n + t.minutes, 0),
-    }))
-    .sort((a, b) => b.min - a.min);
+    .map((cat) => {
+      const catTasks = tasks.filter((t) => t.category === cat.name);
+      const done = catTasks.filter((t) => t.done).length;
+      const pct = catTasks.length
+        ? Math.round((done / catTasks.length) * 100)
+        : 0;
+
+      return {
+        c: cat.name,
+        total: catTasks.length,
+        done,
+        pct,
+      };
+    })
+    .filter((x) => x.total > 0)
+    .sort((a, b) => b.pct - a.pct || b.done - a.done);
 
   const high = grouped[0];
-  const low =
-    [...grouped].reverse().find((x) => x.min > 0) || grouped[grouped.length - 1];
 
   const label =
     period === "Semana"
@@ -2810,20 +2883,21 @@ function PeriodInsight({
       <div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">
         {label}
       </div>
+
       {tasks.length ? (
         <p className="mt-2 text-sm leading-5">
-          Você colocou mais energia em <strong>{high?.c}</strong>.
-          {low && high && low.c !== high.c ? (
+          {high ? (
             <>
-              {" "}
-              A área com menos presença foi <strong>{low.c}</strong>.
+              Sua maior taxa de conclusão foi em <strong>{high.c}</strong>, com{" "}
+              <strong>{high.pct}%</strong> das tarefas concluídas.
             </>
-          ) : null}{" "}
-          O objetivo não é deixar tudo igual, e sim perceber o padrão.
+          ) : (
+            <>Você já tem tarefas neste período. Vá marcando conforme concluir.</>
+          )}
         </p>
       ) : (
-        <p className="mt-2 text-sm text-[#7e8790]">
-          Ainda não há tarefas concluídas neste período.
+        <p className="mt-2 text-sm leading-5 text-[#7e8790]">
+          Ainda não há tarefas neste período para calcular seu ritmo.
         </p>
       )}
     </section>
