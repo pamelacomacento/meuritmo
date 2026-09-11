@@ -12,5 +12,12 @@ export const metadata: Metadata = {
 export const viewport = { themeColor: "#24364b", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="pt-BR"><body>{children}</body></html>;
+  return (
+    <html lang="pt-BR">
+      <body>
+        {children}
+        <script src="/backup-tools.js" defer />
+      </body>
+    </html>
+  );
 }
