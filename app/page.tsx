@@ -86,12 +86,12 @@ type AppState = {
 };
 
 const DEFAULT_CATEGORIES: CategoryDef[] = [
-  { id: "profissional", name: "Profissional", color: "#6585c2" },
-  { id: "pessoal", name: "Pessoal", color: "#da8b78" },
-  { id: "saude", name: "Saúde", color: "#68a88b" },
-  { id: "criatividade", name: "Criatividade", color: "#d2a54e" },
-  { id: "estudos", name: "Estudos", color: "#8b7db7" },
-  { id: "casa", name: "Casa", color: "#9b88a5" },
+  { id: "profissional", name: "Profissional", color: "#233742" },
+  { id: "pessoal", name: "Pessoal", color: "#F39A85" },
+  { id: "saude", name: "Saúde", color: "#88A393" },
+  { id: "criatividade", name: "Criatividade", color: "#D6B46A" },
+  { id: "estudos", name: "Estudos", color: "#7F96A5" },
+  { id: "casa", name: "Casa", color: "#B39AA7" },
 ];
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -195,9 +195,9 @@ const WEEKDAYS = [
 ];
 
 const seed: AppState = {
-  appName: "Meu Ritmo",
+  appName: "Agendinha",
   userName: "Pâmela",
-  accent: "#24364b",
+  accent: "#233742",
   categories: DEFAULT_CATEGORIES,
   tasks: [],
   habits: [],
@@ -212,10 +212,19 @@ function migrateState(raw: any): AppState {
       : DEFAULT_CATEGORIES;
 
   const fallbackCategory = categories[0]?.name || "Pessoal";
+  const legacyAccents = ["#233742", "#496461", "#5d6f91", "#647b68", "#785f79"];
+  const migratedAccent = legacyAccents.includes(raw?.accent) ? "#233742" : raw?.accent;
 
   return {
     ...seed,
     ...raw,
+    accent: migratedAccent || seed.accent,
+    appName:
+      !raw?.appName ||
+      raw.appName === "Meu Ritmo" ||
+      raw.appName === "Agendinha"
+        ? "Agendinha"
+        : raw.appName,
     categories,
     tasks: Array.isArray(raw?.tasks)
       ? raw.tasks.map((t: any) => ({
@@ -378,7 +387,7 @@ export default function Home() {
 
         if (stamp === targetStamp && !sent.includes(key)) {
           const reg = await navigator.serviceWorker.ready;
-          await reg.showNotification("Meu Ritmo", {
+          await reg.showNotification("Agendinha", {
             body: `${t.title}${
               minsBefore ? ` começa em ${minsBefore} min` : " começa agora"
             }.`,
@@ -452,7 +461,10 @@ export default function Home() {
 
   return (
     <main className="min-h-screen px-3 py-4 sm:py-8">
-      <div className="phone-shell mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-[440px] flex-col overflow-hidden rounded-[34px] border border-white/80 bg-[#fffdf9] sm:min-h-[820px]">
+      <div
+        className="phone-shell mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-[440px] flex-col overflow-hidden rounded-[34px] border border-white/80 bg-[#FFFAF4] sm:min-h-[820px]"
+        style={{ "--app-accent": state.accent } as React.CSSProperties}
+      >
         <section className="relative flex min-h-0 flex-1 flex-col">
           <div className="flex-1 overflow-y-auto px-5 pb-7 pt-5 sm:px-6">
             <TopBar
@@ -644,18 +656,17 @@ function TopBar({
   return (
     <div className="mb-5 flex items-center justify-between">
       <div className="flex items-center gap-2.5">
-        <div
-          className="grid h-10 w-10 place-items-center rounded-2xl text-lg font-bold text-white"
-          style={{ background: state.accent }}
-        >
-          ↗
-        </div>
+        <img
+          src="/icon-192.png"
+          alt="Agendinha"
+          className="h-11 w-11 rounded-2xl object-cover shadow-sm"
+        />
         <div>
           <div className="text-[18px] font-semibold leading-none tracking-tight">
-            {state.appName}
+            Agendinha
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-[.14em] text-[#8a929c]">
-            um pouco por vez
+            1% melhor a cada dia
           </div>
         </div>
       </div>
@@ -690,7 +701,7 @@ function BottomNav({
   );
 
   return (
-    <nav className="app-bottom-nav z-50 border-t border-[#e2ddd5] bg-[#fffdf9]/95 px-2 pb-2 pt-2 backdrop-blur">
+    <nav className="app-bottom-nav z-50 border-t border-[#E8DDD2] bg-[#FFFAF4]/95 px-2 pb-2 pt-2 backdrop-blur">
       <div className="grid grid-cols-5 items-end">
         {item("Hoje", "☀️")}
         {item("Calendário", "🗓️")}
@@ -734,9 +745,9 @@ function AddMenu({
             <button
               key={option.kind}
               onClick={() => choose(option.kind)}
-              className="flex w-full items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3 text-left"
+              className="flex w-full items-center gap-3 rounded-2xl border border-[#E8DDD2] bg-white p-3 text-left"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#f4efe8] text-base font-bold">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#F9EEE2] text-base font-bold">
                 {option.icon}
               </span>
               <span className="min-w-0">
@@ -891,12 +902,12 @@ function Today({
             return (
               <div
                 key={h.id}
-                className="flex items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3"
+                className="flex items-center gap-3 rounded-2xl border border-[#E8DDD2] bg-white p-3"
               >
                 <button
                   onClick={() => !quantitative && setValue(done ? 0 : h.goal)}
                   className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
-                    done ? "bg-[#24364b] text-white" : ""
+                    done ? "bg-[var(--app-accent)] text-white" : ""
                   } ${quantitative ? "cursor-default" : ""}`}
                 >
                   {done ? "✓" : ""}
@@ -933,8 +944,8 @@ function Today({
                   onClick={register}
                   className={`shrink-0 rounded-xl px-3 py-2 text-[11px] font-bold ${
                     done && !quantitative
-                      ? "border border-[#ddd7cf] bg-white text-[#68737e]"
-                      : "bg-[#24364b] text-white"
+                      ? "border border-[#E8D9CC] bg-white text-[#68737e]"
+                      : "bg-[var(--app-accent)] text-white"
                   }`}
                 >
                   {quantitative ? "+ registrar" : done ? "Desmarcar" : "Concluir"}
@@ -982,7 +993,7 @@ function FreeTime({ ideas }: { ideas: Idea[] }) {
         Descansar também vale. Se quiser uma ideia, aqui vai uma das suas.
       </p>
       {ideas[0] && (
-        <div className="mt-4 rounded-2xl bg-[#f8edcf] p-3 text-sm font-semibold">
+        <div className="mt-4 rounded-2xl bg-[#FAE9D7] p-3 text-sm font-semibold">
           ✦ {ideas[0].title}
         </div>
       )}
@@ -1005,18 +1016,18 @@ function TaskRow({
   const icon = task.kind === "birthday" ? "☆" : task.kind === "event" ? "□" : "";
 
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3">
+    <div className="flex items-center gap-3 rounded-2xl border border-[#E8DDD2] bg-white p-3">
       {actionable ? (
         <button
           onClick={() => toggle(task.id)}
           className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
-            task.done ? "bg-[#24364b] text-white" : ""
+            task.done ? "bg-[var(--app-accent)] text-white" : ""
           }`}
         >
           {task.done ? "✓" : ""}
         </button>
       ) : (
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#f4efe8] text-xs font-bold">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#F9EEE2] text-xs font-bold">
           {icon}
         </span>
       )}
@@ -1081,7 +1092,7 @@ function CalendarView({
   edit: (t: Task) => void;
   editHabit: (h: Habit) => void;
 }) {
-  const [mode, setMode] = useState<"Mês" | "Semana" | "Agenda">("Mês");
+  const [mode, setMode] = useState<"Hoje" | "Semana" | "Mês">("Hoje");
   const [cursor, setCursor] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
@@ -1090,11 +1101,14 @@ function CalendarView({
       <SectionTitle title="Calendário" subtitle="Veja seu tempo com mais leveza antes de lotar o dia." />
 
       <div className="segment mb-4">
-        {(["Mês", "Semana", "Agenda"] as const).map((m) => (
+        {(["Hoje", "Semana", "Mês"] as const).map((m) => (
           <button
             key={m}
             className={mode === m ? "active" : ""}
-            onClick={() => setMode(m)}
+            onClick={() => {
+              setMode(m);
+              if (m === "Hoje") setCursor(new Date());
+            }}
           >
             {m}
           </button>
@@ -1103,35 +1117,35 @@ function CalendarView({
 
       <div className="mb-4 flex items-center justify-between">
         <button
-          className="rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          className="rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
           onClick={() => setCursor((d) => shiftCursor(d, mode, -1))}
         >
           ‹
         </button>
         <strong className="text-sm capitalize">{calendarLabel(cursor, mode)}</strong>
         <button
-          className="rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          className="rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
           onClick={() => setCursor((d) => shiftCursor(d, mode, 1))}
         >
           ›
         </button>
       </div>
 
-      {mode === "Mês" ? (
-        <MonthGrid
+      {mode === "Hoje" ? (
+        <CalendarDayView
           state={state}
-          cursor={cursor}
-          onSelectDate={setSelectedDay}
+          date={iso(cursor)}
+          toggle={toggleTask}
+          edit={edit}
+          editHabit={editHabit}
         />
       ) : mode === "Semana" ? (
         <WeekGrid state={state} cursor={cursor} edit={edit} editHabit={editHabit} />
       ) : (
-        <Agenda
+        <MonthGrid
           state={state}
           cursor={cursor}
-          toggle={toggleTask}
-          edit={edit}
-          editHabit={editHabit}
+          onSelectDate={setSelectedDay}
         />
       )}
 
@@ -1157,17 +1171,17 @@ function shiftCursor(d: Date, mode: string, n: number) {
 }
 
 function calendarLabel(d: Date, mode: string) {
-  return mode === "Mês"
+  return mode === "Hoje"
     ? new Intl.DateTimeFormat("pt-BR", {
+        weekday: "long",
+        day: "numeric",
         month: "long",
-        year: "numeric",
       }).format(d)
     : mode === "Semana"
     ? `Semana de ${fmtShort(iso(startOfWeek(d)))}`
     : new Intl.DateTimeFormat("pt-BR", {
-        weekday: "long",
-        day: "numeric",
         month: "long",
+        year: "numeric",
       }).format(d);
 }
 
@@ -1215,8 +1229,8 @@ function MonthGrid({
               onClick={() => onSelectDate(ds)}
               className={`min-h-[70px] rounded-xl border p-1.5 text-left transition active:scale-[.98] ${
                 ds === iso()
-                  ? "border-[#24364b] bg-white"
-                  : "border-[#e4dfd8] bg-[#fffefa]"
+                  ? "border-[var(--app-accent)] bg-white"
+                  : "border-[#e4dfd8] bg-[#FFFBF6]"
               } ${dim ? "opacity-35" : ""}`}
               aria-label={`Abrir ${new Intl.DateTimeFormat("pt-BR", {
                 day: "numeric",
@@ -1301,15 +1315,15 @@ function DayDetailSheet({
       return (
         <div
           key={item.id}
-          className="flex items-center gap-3 rounded-2xl border border-[#e7e0d8] bg-[#fffefa] p-3"
+          className="flex items-center gap-3 rounded-2xl border border-[#ECE0D5] bg-[#FFFBF6] p-3"
         >
           {t.kind === "task" ? (
             <button
               onClick={() => toggle(t.id)}
               className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs ${
                 t.done
-                  ? "border-[#24364b] bg-[#24364b] text-white"
-                  : "border-[#d7d1c8] bg-white"
+                  ? "border-[var(--app-accent)] bg-[var(--app-accent)] text-white"
+                  : "border-[#E4D7CB] bg-white"
               }`}
               aria-label={t.done ? "Desmarcar tarefa" : "Concluir tarefa"}
             >
@@ -1339,7 +1353,7 @@ function DayDetailSheet({
               </span>
 
               {t.kind !== "task" && (
-                <span className="rounded-full bg-[#f4efe8] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
+                <span className="rounded-full bg-[#F9EEE2] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
                   {t.kind === "event" ? "evento" : "aniversário"}
                 </span>
               )}
@@ -1366,7 +1380,7 @@ function DayDetailSheet({
           close();
           editHabit(h);
         }}
-        className="flex w-full items-center gap-3 rounded-2xl border border-[#dfe6dd] bg-[#f7f9f5] p-3 text-left"
+        className="flex w-full items-center gap-3 rounded-2xl border border-[#DDE8E0] bg-[#F0F4EF] p-3 text-left"
       >
         <span
           className="h-8 w-1 shrink-0 rounded-full opacity-65"
@@ -1444,7 +1458,7 @@ function DayDetailSheet({
         )}
 
         {!total && (
-          <div className="rounded-2xl bg-[#f6f2ec] px-4 py-6 text-center text-sm text-[#8c949c]">
+          <div className="rounded-2xl bg-[#F9EEE2] px-4 py-6 text-center text-sm text-[#8c949c]">
             Nada marcado por enquanto. Pode ser descanso, respiro ou improviso bom.
           </div>
         )}
@@ -1519,7 +1533,7 @@ function WeekGrid({
                       : editHabit(item as Habit)
                   }
                   className={`mb-1 flex w-full items-center gap-2 rounded-xl p-2 text-left ${
-                    type === "habit" ? "bg-[#f4f6f2]" : "bg-[#f8f4ee]"
+                    type === "habit" ? "bg-[#F1F4F0]" : "bg-[#FCF4EA]"
                   }`}
                 >
                   <span
@@ -1556,6 +1570,167 @@ function WeekGrid({
           </section>
         );
       })}
+    </div>
+  );
+}
+
+function CalendarDayView({
+  state,
+  date,
+  toggle,
+  edit,
+  editHabit,
+}: {
+  state: AppState;
+  date: string;
+  toggle: (id: string) => void;
+  edit: (t: Task) => void;
+  editHabit: (h: Habit) => void;
+}) {
+  const d = new Date(`${date}T12:00:00`);
+  const tasks = state.tasks.filter((t) => taskOccursOnDate(t, date));
+  const habits = state.habits.filter((h) => habitOccursOnDate(h, date));
+
+  const items = [
+    ...tasks.map((t) => ({
+      type: "task" as const,
+      id: `task-${t.id}`,
+      time: t.start || "",
+      task: t,
+    })),
+    ...habits.map((h) => ({
+      type: "habit" as const,
+      id: `habit-${h.id}`,
+      time: h.time || "",
+      habit: h,
+    })),
+  ].sort((a, b) => timeSortValue(a.time) - timeSortValue(b.time));
+
+  const timedItems = items.filter((item) => item.time);
+  const untimedItems = items.filter((item) => !item.time);
+  const total = items.length;
+
+  const renderItem = (item: (typeof items)[number]) => {
+    if (item.type === "task") {
+      const t = item.task;
+
+      return (
+        <div
+          key={item.id}
+          className="flex items-center gap-3 rounded-2xl border border-[#ECE0D5] bg-[#FFFBF6] p-3"
+        >
+          {t.kind === "task" ? (
+            <button
+              onClick={() => toggle(t.id)}
+              className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs ${
+                t.done
+                  ? "border-[var(--app-accent)] bg-[var(--app-accent)] text-white"
+                  : "border-[#E4D7CB] bg-white"
+              }`}
+              aria-label={t.done ? "Desmarcar tarefa" : "Concluir tarefa"}
+            >
+              {t.done ? "✓" : ""}
+            </button>
+          ) : (
+            <span
+              className="h-8 w-1 shrink-0 rounded-full"
+              style={{ background: catColor(state.categories, t.category) }}
+            />
+          )}
+
+          <button onClick={() => edit(t)} className="min-w-0 flex-1 text-left">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span
+                className={`truncate text-sm font-semibold ${
+                  t.kind === "task" && t.done ? "text-[#8c949c] line-through" : ""
+                }`}
+              >
+                {t.title}
+              </span>
+
+              {t.kind !== "task" && (
+                <span className="rounded-full bg-[#F9EEE2] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
+                  {t.kind === "event" ? "evento" : "aniversário"}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-0.5 text-[10px] text-[#8c949c]">
+              {timeRangeLabel(t)}
+              {t.category ? ` · ${t.category}` : ""}
+            </div>
+          </button>
+        </div>
+      );
+    }
+
+    const h = item.habit;
+    const current = h.logs[date] || 0;
+    const quantitative = h.goal > 1 || h.unit.trim().toLowerCase() !== "vez";
+
+    return (
+      <button
+        key={item.id}
+        onClick={() => editHabit(h)}
+        className="flex w-full items-center gap-3 rounded-2xl border border-[#DDE8E0] bg-[#F0F4EF] p-3 text-left"
+      >
+        <span
+          className="h-8 w-1 shrink-0 rounded-full opacity-65"
+          style={{ background: catColor(state.categories, h.category) }}
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-semibold">{h.title}</span>
+            <span className="rounded-full bg-white px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#7e8790]">
+              hábito
+            </span>
+          </div>
+
+          <div className="mt-0.5 text-[10px] text-[#8c949c]">
+            {habitTimeRangeLabel(h)}
+            {quantitative
+              ? ` · ${current}/${h.goal} ${h.unit}`
+              : current >= h.goal
+              ? " · concluído"
+              : ""}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl bg-[#F9EEE2] px-4 py-3 text-sm text-[#6d7782]">
+        <div className="text-[10px] font-bold uppercase tracking-[.14em] text-[#8c949c]">
+          Visão do dia
+        </div>
+        <div className="mt-1 font-semibold capitalize text-[#233742]">
+          {new Intl.DateTimeFormat("pt-BR", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+          }).format(d)}
+        </div>
+      </div>
+
+      {timedItems.length > 0 && <div className="space-y-2">{timedItems.map(renderItem)}</div>}
+
+      {untimedItems.length > 0 && (
+        <div className={timedItems.length ? "mt-1" : ""}>
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#9aa0a6]">
+            Sem horário
+          </div>
+          <div className="space-y-2">{untimedItems.map(renderItem)}</div>
+        </div>
+      )}
+
+      {!total && (
+        <div className="rounded-2xl bg-[#F9EEE2] px-4 py-6 text-center text-sm text-[#8c949c]">
+          Nada marcado por enquanto. Pode ser descanso, respiro ou improviso bom.
+        </div>
+      )}
     </div>
   );
 }
@@ -1618,7 +1793,7 @@ function Agenda({
                   <button
                     key={h.id}
                     onClick={() => editHabit(h)}
-                    className="flex w-full items-center gap-3 rounded-2xl border border-[#e0e5dd] bg-[#f7f9f5] p-3 text-left"
+                    className="flex w-full items-center gap-3 rounded-2xl border border-[#DFE7E1] bg-[#F0F4EF] p-3 text-left"
                   >
                     <span
                       className="h-8 w-1 shrink-0 rounded-full opacity-65"
@@ -1696,7 +1871,7 @@ function HabitsView({
         action={
           <button
             onClick={() => setShowAdd(true)}
-            className="rounded-xl bg-[#24364b] px-3 py-2 text-xs font-bold text-white"
+            className="rounded-xl bg-[var(--app-accent)] px-3 py-2 text-xs font-bold text-white"
           >
             + hábito
           </button>
@@ -1752,21 +1927,21 @@ function HabitsView({
                         <button
                           key={amount}
                           onClick={() => log(h, amount)}
-                          className="rounded-xl border border-[#ddd7cf] bg-white py-2 text-[11px] font-bold"
+                          className="rounded-xl border border-[#E8D9CC] bg-white py-2 text-[11px] font-bold"
                         >
                           +{amount}
                         </button>
                       ))}
                       <button
                         onClick={() => registerCustom(h)}
-                        className="rounded-xl bg-[#24364b] py-2 text-[11px] font-bold text-white"
+                        className="rounded-xl bg-[var(--app-accent)] py-2 text-[11px] font-bold text-white"
                       >
                         Outro
                       </button>
                     </div>
                     <button
                       onClick={() => log(h, -habitQuickAmounts(h)[0])}
-                      className="mt-2 w-full rounded-xl border border-[#ddd7cf] py-2 text-[11px] font-bold text-[#68737e]"
+                      className="mt-2 w-full rounded-xl border border-[#E8D9CC] py-2 text-[11px] font-bold text-[#68737e]"
                     >
                       Corrigir −{habitQuickAmounts(h)[0]} {h.unit}
                     </button>
@@ -1775,13 +1950,13 @@ function HabitsView({
                   <div className="flex gap-2">
                     <button
                       onClick={() => log(h, -1)}
-                      className="flex-1 rounded-xl border border-[#ddd7cf] py-2 text-sm"
+                      className="flex-1 rounded-xl border border-[#E8D9CC] py-2 text-sm"
                     >
                       −
                     </button>
                     <button
                       onClick={() => log(h, 1)}
-                      className="flex-1 rounded-xl bg-[#24364b] py-2 text-sm font-bold text-white"
+                      className="flex-1 rounded-xl bg-[var(--app-accent)] py-2 text-sm font-bold text-white"
                     >
                       + registrar
                     </button>
@@ -1866,7 +2041,7 @@ function MiniHabitHistory({
           <div key={d} className="text-center">
             <div
               className={`mx-auto h-5 w-5 rounded-full ${
-                done ? "" : "border border-[#ddd7cf]"
+                done ? "" : "border border-[#E8D9CC]"
               }`}
               style={done ? { background: catColor(defs, h.category) } : {}}
             />
@@ -1920,8 +2095,8 @@ function MoreHub({
             onClick={() => setActive(name)}
             className={`rounded-full px-3 py-2 text-xs font-bold transition ${
               active === name
-                ? "bg-[#24364b] text-white shadow-sm"
-                : "border border-[#ddd7cf] bg-white text-[#68737e]"
+                ? "bg-[var(--app-accent)] text-white shadow-sm"
+                : "border border-[#E8D9CC] bg-white text-[#68737e]"
             }`}
           >
             {icon} {name}
@@ -2003,8 +2178,8 @@ function TasksHub({
             onClick={() => setFilter(f)}
             className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
               filter === f
-                ? "bg-[#24364b] text-white"
-                : "border border-[#ddd7cf] bg-white"
+                ? "bg-[var(--app-accent)] text-white"
+                : "border border-[#E8D9CC] bg-white"
             }`}
           >
             {f}
@@ -2167,7 +2342,7 @@ function Eisenhower({
     {
       title: "Fazer agora",
       sub: "Urgente + importante",
-      bg: "#f6ded6",
+      bg: "#F7D8D0",
       fn: (t: Task) => t.priority === 3 && t.date <= iso(),
     },
     {
@@ -2179,13 +2354,13 @@ function Eisenhower({
     {
       title: "Resolver rápido",
       sub: "Urgente",
-      bg: "#f8edcf",
+      bg: "#FAE9D7",
       fn: (t: Task) => t.priority === 1 && t.date <= iso(),
     },
     {
       title: "Talvez depois",
       sub: "Baixa pressão",
-      bg: "#e3efe8",
+      bg: "#E4EEE7",
       fn: (t: Task) => t.priority <= 1 && t.date > iso(),
     },
   ];
@@ -2313,7 +2488,7 @@ function Countdowns({
                     countdowns: s.countdowns.filter((x) => x.id !== c.id),
                   }))
                 }
-                className="mt-3 text-[10px] text-[#a1685d]"
+                className="mt-3 text-[10px] text-[#A96E62]"
               >
                 remover
               </button>
@@ -2325,19 +2500,19 @@ function Countdowns({
       <section className="soft-card mt-4 p-4">
         <div className="text-sm font-semibold">Nova contagem</div>
         <input
-          className="mt-3 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          className="mt-3 w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
           placeholder="Ex.: viagem"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
         <input
           type="date"
-          className="mt-2 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          className="mt-2 w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
           value={date}
           onChange={(e) => setDate(e.target.value)}
         />
         <select
-          className="mt-2 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          className="mt-2 w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
         >
@@ -2359,7 +2534,7 @@ function Countdowns({
             }));
             setTitle("");
           }}
-          className="mt-3 w-full rounded-xl bg-[#24364b] py-2.5 text-xs font-bold text-white"
+          className="mt-3 w-full rounded-xl bg-[var(--app-accent)] py-2.5 text-xs font-bold text-white"
         >
           Adicionar
         </button>
@@ -2391,7 +2566,7 @@ function Ideas({
         action={
           <button
             onClick={() => setCreating(true)}
-            className="rounded-xl bg-[#24364b] px-3 py-2 text-xs font-bold text-white"
+            className="rounded-xl bg-[var(--app-accent)] px-3 py-2 text-xs font-bold text-white"
           >
             + Nova ideia
           </button>
@@ -2406,7 +2581,7 @@ function Ideas({
           </p>
           <button
             onClick={() => setCreating(true)}
-            className="mt-3 rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs font-bold"
+            className="mt-3 rounded-xl border border-[#E8D9CC] px-3 py-2 text-xs font-bold"
           >
             + Adicionar ideia
           </button>
@@ -2426,7 +2601,7 @@ function Ideas({
                 {i.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="rounded-full bg-[#f6f2ec] px-2 py-1 text-[10px] text-[#7e8790]"
+                    className="rounded-full bg-[#F9EEE2] px-2 py-1 text-[10px] text-[#7e8790]"
                   >
                     #{tag}
                   </span>
@@ -2437,13 +2612,13 @@ function Ideas({
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 onClick={() => convertIdea(i)}
-                className="rounded-xl bg-[#24364b] px-3 py-2 text-xs font-bold text-white"
+                className="rounded-xl bg-[var(--app-accent)] px-3 py-2 text-xs font-bold text-white"
               >
                 Transformar em tarefa
               </button>
               <button
                 onClick={() => setEditing(i)}
-                className="rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs font-bold"
+                className="rounded-xl border border-[#E8D9CC] px-3 py-2 text-xs font-bold"
               >
                 Editar
               </button>
@@ -2451,7 +2626,7 @@ function Ideas({
 
             <button
               onClick={() => removeIdea(i.id)}
-              className="mt-3 text-[10px] font-bold text-[#a1685d]"
+              className="mt-3 text-[10px] font-bold text-[#A96E62]"
             >
               Excluir ideia
             </button>
@@ -2538,7 +2713,7 @@ function Rhythm({ state }: { state: AppState }) {
           </div>
           <div
             className={`text-xs font-bold ${
-              delta >= 0 ? "text-[#5e9478]" : "text-[#b46d5d]"
+              delta >= 0 ? "text-[#6F8F7C]" : "text-[#B96F60]"
             }`}
           >
             {delta >= 0 ? "+" : ""}
@@ -2662,7 +2837,7 @@ function Profile({
   state: AppState;
   setState: React.Dispatch<React.SetStateAction<AppState>>;
 }) {
-  const accents = ["#24364b", "#315f61", "#5d6f91", "#647b68", "#785f79"];
+  const accents = ["#233742", "#F39A85", "#88A393", "#496461"];
   const [permission, setPermission] = useState<string>("default");
   const [installable, setInstallable] = useState(false);
   const [newCategory, setNewCategory] = useState("");
@@ -2690,11 +2865,11 @@ function Profile({
   const testNotification = async () => {
     if (Notification.permission !== "granted") return enableNotifications();
     const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification("Meu Ritmo", {
+    await reg.showNotification("Agendinha", {
       body: "Notificações ativadas ✨ Este é um lembrete de teste.",
       icon: "/icon-192.png",
       badge: "/icon-192.png",
-      tag: "teste-meu-ritmo",
+      tag: "teste-agendinha",
     });
   };
 
@@ -2734,7 +2909,7 @@ function Profile({
               auth: data.auth,
             },
           },
-          title: "Meu Ritmo",
+          title: "Agendinha",
           body: "Push com o app fechado funcionando ✨",
           delaySeconds: 10,
         }),
@@ -2812,16 +2987,7 @@ function Profile({
           onChange={(e) =>
             setState((s) => ({ ...s, userName: e.target.value }))
           }
-          className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
-        />
-
-        <label className="mt-4 block text-xs font-bold">Nome do app</label>
-        <input
-          value={state.appName}
-          onChange={(e) =>
-            setState((s) => ({ ...s, appName: e.target.value }))
-          }
-          className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
+          className="mt-2 w-full rounded-xl border border-[#E8D9CC] px-3 py-2 text-sm"
         />
 
         <div className="mt-4 text-xs font-bold">Cor principal</div>
@@ -2831,7 +2997,7 @@ function Profile({
               key={a}
               onClick={() => setState((s) => ({ ...s, accent: a }))}
               className={`h-9 w-9 rounded-full ${
-                state.accent === a ? "ring-2 ring-offset-2 ring-[#24364b]" : ""
+                state.accent === a ? "ring-2 ring-offset-2 ring-[var(--app-accent)]" : ""
               }`}
               style={{ background: a }}
             />
@@ -2849,7 +3015,7 @@ function Profile({
           {state.categories.map((c, index) => (
             <div
               key={c.id}
-              className="rounded-2xl border border-[#e2ddd5] bg-white p-3"
+              className="rounded-2xl border border-[#E8DDD2] bg-white p-3"
             >
               <div className="flex items-center gap-2">
                 <input
@@ -2868,24 +3034,24 @@ function Profile({
                 <input
                   defaultValue={c.name}
                   onBlur={(e) => renameCategory(c.id, e.target.value)}
-                  className="min-w-0 flex-1 rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
+                  className="min-w-0 flex-1 rounded-xl border border-[#E8D9CC] px-3 py-2 text-sm"
                 />
                 <button
                   onClick={() => moveCategory(index, -1)}
-                  className="rounded-lg border border-[#ddd7cf] px-2 py-2 text-xs"
+                  className="rounded-lg border border-[#E8D9CC] px-2 py-2 text-xs"
                 >
                   ↑
                 </button>
                 <button
                   onClick={() => moveCategory(index, 1)}
-                  className="rounded-lg border border-[#ddd7cf] px-2 py-2 text-xs"
+                  className="rounded-lg border border-[#E8D9CC] px-2 py-2 text-xs"
                 >
                   ↓
                 </button>
               </div>
               <button
                 onClick={() => deleteCategory(c.id)}
-                className="mt-2 text-[10px] font-bold text-[#a1685d]"
+                className="mt-2 text-[10px] font-bold text-[#A96E62]"
               >
                 Excluir categoria
               </button>
@@ -2898,7 +3064,7 @@ function Profile({
             value={newCategory}
             onChange={(e) => setNewCategory(e.target.value)}
             placeholder="Nova categoria"
-            className="min-w-0 flex-1 rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
+            className="min-w-0 flex-1 rounded-xl border border-[#E8D9CC] px-3 py-2 text-sm"
           />
           <button
             onClick={() => {
@@ -2921,7 +3087,7 @@ function Profile({
               }));
               setNewCategory("");
             }}
-            className="rounded-xl bg-[#24364b] px-4 py-2 text-xs font-bold text-white"
+            className="rounded-xl bg-[var(--app-accent)] px-4 py-2 text-xs font-bold text-white"
           >
             Criar
           </button>
@@ -2939,8 +3105,8 @@ function Profile({
           <span
             className={`chip ${
               permission === "granted"
-                ? "bg-[#e3efe8] text-[#4d7c65]"
-                : "bg-[#f6f2ec] text-[#7e8790]"
+                ? "bg-[#E4EEE7] text-[#587565]"
+                : "bg-[#F9EEE2] text-[#7e8790]"
             }`}
           >
             {permission === "granted" ? "Ativas" : "Desligadas"}
@@ -2950,13 +3116,13 @@ function Profile({
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button
             onClick={enableNotifications}
-            className="rounded-xl bg-[#24364b] px-3 py-2.5 text-xs font-bold text-white"
+            className="rounded-xl bg-[var(--app-accent)] px-3 py-2.5 text-xs font-bold text-white"
           >
             {permission === "granted" ? "Reautorizar" : "Ativar"}
           </button>
           <button
             onClick={testNotification}
-            className="rounded-xl border border-[#ddd7cf] px-3 py-2.5 text-xs font-bold"
+            className="rounded-xl border border-[#E8D9CC] px-3 py-2.5 text-xs font-bold"
           >
             Testar
           </button>
@@ -2964,7 +3130,7 @@ function Profile({
 
         <button
           onClick={testServerPush}
-          className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2.5 text-xs font-bold"
+          className="mt-2 w-full rounded-xl border border-[#E8D9CC] px-3 py-2.5 text-xs font-bold"
         >
           Testar push do servidor
         </button>
@@ -2993,7 +3159,7 @@ function Profile({
             localStorage.removeItem("meu-ritmo-v2.3");
             location.reload();
           }}
-          className="mt-4 text-xs font-bold text-[#a1685d]"
+          className="mt-4 text-xs font-bold text-[#A96E62]"
         >
           Limpar todos os dados
         </button>
@@ -3115,7 +3281,7 @@ function TaskComposer({
         </div>
 
         {initial && !task && initial?.notes && (
-          <div className="mb-3 rounded-xl bg-[#f6f2ec] px-3 py-2 text-[11px] text-[#6f7882]">
+          <div className="mb-3 rounded-xl bg-[#F9EEE2] px-3 py-2 text-[11px] text-[#6f7882]">
             Criando tarefa a partir de uma ideia
           </div>
         )}
@@ -3150,7 +3316,7 @@ function TaskComposer({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={kind === "birthday" ? "Ex.: Aniversário da Emily" : kind === "event" ? "Ex.: Vôlei" : "O que precisa ser feito?"}
-          className="w-full rounded-2xl border border-[#ddd7cf] px-4 py-3 text-base font-semibold"
+          className="w-full rounded-2xl border border-[#E8D9CC] px-4 py-3 text-base font-semibold"
         />
 
         <div className="mt-3 grid grid-cols-2 gap-2">
@@ -3188,12 +3354,12 @@ function TaskComposer({
               onChange={(e) =>
                 setDurationValue(e.target.value === "" ? 0 : Number(e.target.value))
               }
-              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
             />
             <select
               value={durationUnit}
               onChange={(e) => setDurationUnit(e.target.value as "min" | "h")}
-              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
             >
               <option value="min">minutos</option>
               <option value="h">horas</option>
@@ -3218,7 +3384,7 @@ function TaskComposer({
                     setDurationValue(x.m);
                   }
                 }}
-                className="rounded-xl border border-[#ddd7cf] bg-white px-2 py-2 text-[11px] font-bold"
+                className="rounded-xl border border-[#E8D9CC] bg-white px-2 py-2 text-[11px] font-bold"
               >
                 {x.label}
               </button>
@@ -3237,7 +3403,7 @@ function TaskComposer({
                 key={c.id}
                 onClick={() => setCategory(c.name)}
                 className={`chip ${
-                  category === c.name ? "ring-2 ring-[#24364b]/40" : ""
+                  category === c.name ? "ring-2 ring-[var(--app-accent)]/40" : ""
                 }`}
                 style={{ background: `${c.color}20`, color: c.color }}
               >
@@ -3262,7 +3428,7 @@ function TaskComposer({
 
         <button
           onClick={() => setMoreOptions((v) => !v)}
-          className="mt-3 w-full rounded-xl border border-[#ddd7cf] bg-[#fffdf9] px-3 py-2.5 text-xs font-bold"
+          className="mt-3 w-full rounded-xl border border-[#E8D9CC] bg-[#FFFAF4] px-3 py-2.5 text-xs font-bold"
         >
           {moreOptions ? "− Menos opções" : "+ Mais opções"}
         </button>
@@ -3321,8 +3487,8 @@ function TaskComposer({
                       onClick={() => toggleDay(d.n)}
                       className={`rounded-xl py-2 text-[10px] font-bold ${
                         recurrenceDays.includes(d.n)
-                          ? "bg-[#24364b] text-white"
-                          : "border border-[#ddd7cf] bg-white"
+                          ? "bg-[var(--app-accent)] text-white"
+                          : "border border-[#E8D9CC] bg-white"
                       }`}
                     >
                       {d.label}
@@ -3373,7 +3539,7 @@ function TaskComposer({
               {steps.map((s) => (
                 <div
                   key={s.id}
-                  className="mb-1 flex items-center gap-2 rounded-xl bg-[#f6f2ec] px-3 py-2 text-xs"
+                  className="mb-1 flex items-center gap-2 rounded-xl bg-[#F9EEE2] px-3 py-2 text-xs"
                 >
                   <input
                     type="checkbox"
@@ -3418,7 +3584,7 @@ function TaskComposer({
                     }
                   }}
                   placeholder="Adicionar etapa"
-                  className="flex-1 rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs"
+                  className="flex-1 rounded-xl border border-[#E8D9CC] px-3 py-2 text-xs"
                 />
                 <button
                   onClick={() => {
@@ -3430,7 +3596,7 @@ function TaskComposer({
                       setStep("");
                     }
                   }}
-                  className="rounded-xl border border-[#ddd7cf] px-3 text-xs font-bold"
+                  className="rounded-xl border border-[#E8D9CC] px-3 text-xs font-bold"
                 >
                   +
                 </button>
@@ -3443,14 +3609,14 @@ function TaskComposer({
           {remove && (
             <button
               onClick={remove}
-              className="rounded-xl border border-[#e8cfc8] px-4 py-3 text-xs font-bold text-[#a1685d]"
+              className="rounded-xl border border-[#F0D1C7] px-4 py-3 text-xs font-bold text-[#A96E62]"
             >
               Excluir
             </button>
           )}
           <button
             onClick={submit}
-            className="flex-1 rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white"
+            className="flex-1 rounded-xl bg-[var(--app-accent)] py-3 text-xs font-bold text-white"
           >
             Salvar {taskKindLabel(kind).toLowerCase()}
           </button>
@@ -3550,7 +3716,7 @@ function HabitComposer({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Ex.: Aula de teclado"
-          className="w-full rounded-xl border border-[#ddd7cf] px-3 py-3"
+          className="w-full rounded-xl border border-[#E8D9CC] px-3 py-3"
         />
 
         <div className="mt-3">
@@ -3564,7 +3730,7 @@ function HabitComposer({
                 key={c.id}
                 onClick={() => setCategory(c.name)}
                 className={`chip ${
-                  category === c.name ? "ring-2 ring-[#24364b]/40" : ""
+                  category === c.name ? "ring-2 ring-[var(--app-accent)]/40" : ""
                 }`}
                 style={{ background: `${c.color}20`, color: c.color }}
               >
@@ -3600,8 +3766,8 @@ function HabitComposer({
                   onClick={() => toggleDay(d.n)}
                   className={`rounded-xl py-2 text-[10px] font-bold ${
                     days.includes(d.n)
-                      ? "bg-[#24364b] text-white"
-                      : "border border-[#ddd7cf] bg-white"
+                      ? "bg-[var(--app-accent)] text-white"
+                      : "border border-[#E8D9CC] bg-white"
                   }`}
                 >
                   {d.label}
@@ -3643,12 +3809,12 @@ function HabitComposer({
               step={durationUnit === "h" ? "0.5" : "5"}
               value={durationValue}
               onChange={(e) => setDurationValue(Number(e.target.value))}
-              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
             />
             <select
               value={durationUnit}
               onChange={(e) => setDurationUnit(e.target.value as "min" | "h")}
-              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
             >
               <option value="min">minutos</option>
               <option value="h">horas</option>
@@ -3714,7 +3880,7 @@ function HabitComposer({
         </Field>
 
         {habit && (
-          <label className="mt-3 flex items-center justify-between rounded-xl border border-[#ddd7cf] bg-white px-3 py-3 text-xs font-bold">
+          <label className="mt-3 flex items-center justify-between rounded-xl border border-[#E8D9CC] bg-white px-3 py-3 text-xs font-bold">
             Hábito arquivado
             <input
               type="checkbox"
@@ -3728,14 +3894,14 @@ function HabitComposer({
           {remove && (
             <button
               onClick={remove}
-              className="rounded-xl border border-[#e8cfc8] px-4 py-3 text-xs font-bold text-[#a1685d]"
+              className="rounded-xl border border-[#F0D1C7] px-4 py-3 text-xs font-bold text-[#A96E62]"
             >
               Excluir
             </button>
           )}
           <button
             onClick={submit}
-            className="flex-1 rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white"
+            className="flex-1 rounded-xl bg-[var(--app-accent)] py-3 text-xs font-bold text-white"
           >
             Salvar hábito
           </button>
@@ -3778,7 +3944,7 @@ function IdeaComposer({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Qual é a ideia?"
-          className="w-full rounded-xl border border-[#ddd7cf] px-3 py-3"
+          className="w-full rounded-xl border border-[#E8D9CC] px-3 py-3"
         />
 
         <div className="mt-3 mb-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
@@ -3790,7 +3956,7 @@ function IdeaComposer({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="Anotações livres..."
-          className="min-h-24 w-full rounded-xl border border-[#ddd7cf] px-3 py-3 text-sm"
+          className="min-h-24 w-full rounded-xl border border-[#E8D9CC] px-3 py-3 text-sm"
         />
 
         <div className="mt-3">
@@ -3804,7 +3970,7 @@ function IdeaComposer({
                 key={c.id}
                 onClick={() => setCategory(c.name)}
                 className={`chip ${
-                  category === c.name ? "ring-2 ring-[#24364b]/40" : ""
+                  category === c.name ? "ring-2 ring-[var(--app-accent)]/40" : ""
                 }`}
                 style={{ background: `${c.color}20`, color: c.color }}
               >
@@ -3837,7 +4003,7 @@ function IdeaComposer({
                 .filter(Boolean),
             });
           }}
-          className="mt-5 w-full rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white"
+          className="mt-5 w-full rounded-xl bg-[var(--app-accent)] py-3 text-xs font-bold text-white"
         >
           Salvar ideia
         </button>
@@ -3856,7 +4022,7 @@ function Field({
   required?: boolean;
 }) {
   return (
-    <label className="mt-2 block rounded-xl border border-[#ddd7cf] bg-white px-3 py-2">
+    <label className="mt-2 block rounded-xl border border-[#E8D9CC] bg-white px-3 py-2">
       <span className="mb-1 flex items-center justify-between gap-2 text-[9px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
         <span>{label}</span>
         <span className={required ? "text-[#6f7f92]" : "text-[#a1a7ad]"}>
@@ -3902,13 +4068,13 @@ function FocusSheet({
         <div className="flex gap-2">
           <button
             onClick={toggle}
-            className="flex-1 rounded-xl border border-[#ddd7cf] py-3 text-sm font-bold"
+            className="flex-1 rounded-xl border border-[#E8D9CC] py-3 text-sm font-bold"
           >
             {running ? "Pausar" : "Continuar"}
           </button>
           <button
             onClick={finish}
-            className="flex-1 rounded-xl bg-[#24364b] py-3 text-sm font-bold text-white"
+            className="flex-1 rounded-xl bg-[var(--app-accent)] py-3 text-sm font-bold text-white"
           >
             Concluir
           </button>
@@ -3944,11 +4110,11 @@ function SectionTitle({
   return (
     <div className="mb-5 flex items-start justify-between gap-3">
       <div>
-        <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/85 px-3 py-1 text-[10px] font-bold uppercase tracking-[.14em] text-[#8a93a0] shadow-sm ring-1 ring-[#ece3d7]">
+        <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/85 px-3 py-1 text-[10px] font-bold uppercase tracking-[.14em] text-[#8a93a0] shadow-sm ring-1 ring-[#EADCCF]">
           <span>{emoji || "✦"}</span>
           <span>{title}</span>
         </div>
-        <h1 className="text-[26px] font-semibold tracking-tight text-[#22364a]">
+        <h1 className="text-[26px] font-semibold tracking-tight text-[#233742]">
           {emoji ? `${emoji} ${title}` : title}
         </h1>
         <p className="mt-1 text-xs leading-5 text-[#7e8790]">{subtitle}</p>

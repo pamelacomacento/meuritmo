@@ -2,13 +2,13 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Meu Ritmo",
-    short_name: "Meu Ritmo",
-    description: "Planejamento pessoal, foco, hábitos e equilíbrio em um só lugar.",
+    name: "Agendinha",
+    short_name: "Agendinha",
+    description: "Sua rotina, tarefas, hábitos e planos em um lugar leve e organizado.",
     start_url: "/",
     display: "standalone",
     background_color: "#fffdf9",
-    theme_color: "#24364b",
+    theme_color: "#8fb6a6",
     orientation: "portrait",
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png" },

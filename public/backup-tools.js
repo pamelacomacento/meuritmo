@@ -21,7 +21,7 @@
     }
 
     const payload = {
-      app: "Meu Ritmo",
+      app: "Agendinha",
       backupVersion: 1,
       storageKey: STORAGE_KEY,
       exportedAt: new Date().toISOString(),
@@ -35,7 +35,7 @@
     const a = document.createElement("a");
     const today = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = `meu-ritmo-backup-${today}.json`;
+    a.download = `agendinha-backup-${today}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -69,7 +69,7 @@
       alert("Backup importado com sucesso. O app será recarregado agora.");
       location.reload();
     } catch {
-      alert("Não consegui ler esse arquivo como um backup válido do Meu Ritmo.");
+      alert("Não consegui ler esse arquivo como um backup válido da Agendinha.");
     }
   }
 

@@ -92,8 +92,16 @@ export default function LoginPage() {
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-[440px] items-center justify-center">
         <section className="w-full rounded-[30px] border border-[#e6dfd6] bg-[#fffdf9] p-6 shadow-sm">
           <div className="mb-8">
-            <div className="mb-3 inline-flex rounded-full bg-[#24364b]/10 px-3 py-1 text-[11px] font-bold">
-              Meu Ritmo
+            <div className="mb-4 flex items-center gap-3">
+              <img
+                src="/icon-192.png"
+                alt="Ícone Agendinha"
+                className="h-14 w-14 rounded-2xl shadow-sm"
+              />
+              <div>
+                <div className="text-xl font-semibold tracking-tight">Agendinha</div>
+                <div className="mt-0.5 text-[11px] font-medium text-[#87909a]">Sua rotina mais leve</div>
+              </div>
             </div>
             <h1 className="text-3xl font-semibold tracking-tight">
               {mode === "login" ? "Entrar" : "Criar sua conta"}

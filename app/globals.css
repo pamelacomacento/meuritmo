@@ -4,23 +4,23 @@
 
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
-html { background: #ece7df; max-width:100%; overflow-x:hidden; }
+html { background: #EFE8DE; max-width:100%; overflow-x:hidden; }
 body {
   margin: 0;
   min-height: 100vh;
   max-width:100%;
   overflow-x:hidden;
   background:
-    radial-gradient(circle at 8% 2%, rgba(242,224,185,.62), transparent 24%),
-    radial-gradient(circle at 94% 9%, rgba(210,230,218,.58), transparent 28%),
-    radial-gradient(circle at 50% 100%, rgba(233,210,222,.36), transparent 32%),
-    #ece7df;
-  color: #24364b;
+    radial-gradient(circle at 8% 2%, rgba(243,154,133,.20), transparent 26%),
+    radial-gradient(circle at 94% 9%, rgba(136,163,147,.24), transparent 30%),
+    radial-gradient(circle at 50% 100%, rgba(249,238,226,.80), transparent 36%),
+    #EFE8DE;
+  color: #233742;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 button,input,textarea,select { font: inherit; }
 button { cursor: pointer; }
-::selection { background:#efc6b7; }
+::selection { background:#F3B8A8; }
 .phone-shell {
   box-shadow:0 26px 80px rgba(34,49,67,.16),0 3px 14px rgba(34,49,67,.06);
   background: linear-gradient(180deg, rgba(255,253,249,1) 0%, rgba(255,252,247,1) 100%);
@@ -42,26 +42,26 @@ button { cursor: pointer; }
   align-items:center;
   gap:2px;
   padding:7px 2px 5px;
-  color:#85909c;
+  color:#829096;
   font-size:9px;
   font-weight:700;
   border-radius:14px;
   transition: all .18s ease;
 }
 .nav-item.active {
-  color:#24364b;
+  color:#233742;
   background:rgba(243,238,231,.86);
 }
 .nav-icon { font-size:18px; line-height:1; }
 .hide-scrollbar::-webkit-scrollbar { display:none; }
 .hide-scrollbar { scrollbar-width:none; }
-.segment { background:#f1ece5; padding:3px; border-radius:14px; display:flex; gap:3px; }
-.segment button { flex:1; border-radius:11px; padding:8px 10px; font-size:11px; font-weight:700; color:#7d8794; }
-.segment button.active { background:white; color:#24364b; box-shadow:0 2px 7px rgba(36,54,75,.08); }
-.progressbar { height:8px; overflow:hidden; border-radius:99px; background:#eee7df; }
+.segment { background:#F9EEE2; padding:3px; border-radius:14px; display:flex; gap:3px; }
+.segment button { flex:1; border-radius:11px; padding:8px 10px; font-size:11px; font-weight:700; color:#7B878A; }
+.segment button.active { background:white; color:#233742; box-shadow:0 2px 7px rgba(36,54,75,.08); }
+.progressbar { height:8px; overflow:hidden; border-radius:99px; background:#EADFD4; }
 .progressbar > div { height:100%; border-radius:99px; transition:width .2s ease; }
 .modal-backdrop { position:fixed; inset:0; z-index:60; display:grid; place-items:end center; background:rgba(30,40,50,.32); backdrop-filter:blur(5px); }
-.sheet { width:min(100%,440px); max-height:92vh; overflow:auto; overflow-x:hidden; border-radius:30px 30px 0 0; background:#fffdf9; padding:20px; box-shadow:0 -16px 50px rgba(30,40,50,.16); }
+.sheet { width:min(100%,440px); max-height:92vh; overflow:auto; overflow-x:hidden; border-radius:30px 30px 0 0; background:#FFFAF4; padding:20px; box-shadow:0 -16px 50px rgba(30,40,50,.16); }
 .chip {
   display:inline-flex;
   align-items:center;
@@ -78,15 +78,15 @@ button { cursor: pointer; }
   border-radius:50%;
   display:grid;
   place-items:center;
-  border:5px solid #fffdf9;
+  border:5px solid #FFFAF4;
   margin:-24px auto 0;
-  background:#24364b;
+  background:#233742;
   color:#fff;
   font-size:24px;
   box-shadow:0 8px 22px rgba(36,54,75,.22);
 }
 textarea { resize:vertical; }
-input[type="checkbox"] { accent-color:#24364b; }
+input[type="checkbox"] { accent-color:#233742; }
 
 /* iPhone/Safari: evita o zoom automático ao focar campos menores que 16px. */
 @media (max-width:639px){
@@ -152,4 +152,77 @@ input[type="checkbox"] { accent-color:#24364b; }
   .phone-shell {
     padding-bottom: calc(86px + env(safe-area-inset-bottom));
   }
+}
+
+
+/* Identidade Agendinha */
+:root {
+  --ag-blue: #233742;
+  --ag-peach: #F39A85;
+  --ag-cream: #F9EEE2;
+  --ag-sage: #88A393;
+  --ag-deep-sage: #496461;
+}
+
+.phone-shell {
+  background: linear-gradient(180deg, #FFFBF6 0%, #FFF9F2 100%);
+}
+
+.card {
+  background: linear-gradient(180deg, #FFFCF8 0%, #FFF8F1 100%);
+  border-color: rgba(232,217,204,.72);
+}
+
+.soft-card {
+  background: linear-gradient(180deg, #FBF0E5 0%, #F8ECDF 100%);
+  border-color: rgba(232,217,204,.62);
+}
+
+.nav-item.active {
+  color: var(--ag-blue);
+  background: rgba(243,154,133,.12);
+}
+
+.segment {
+  background: #F6EBDD;
+}
+
+.segment button.active {
+  background: #FFFBF6;
+  color: var(--ag-blue);
+  box-shadow: 0 2px 8px rgba(35,55,66,.08);
+}
+
+.fab {
+  background: var(--app-accent, var(--ag-blue));
+  border-color: #FFFAF4;
+  box-shadow: 0 8px 22px rgba(35,55,66,.22);
+}
+
+.app-bottom-nav {
+  background: rgba(255,250,244,.97);
+  border-color: rgba(232,217,204,.8);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--app-accent, var(--ag-sage));
+}
+
+
+/* A opção "Cor principal" controla os elementos interativos do app. */
+.phone-shell {
+  --app-accent: var(--ag-blue);
+}
+
+.nav-item.active {
+  color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 11%, transparent);
+}
+
+.segment button.active {
+  color: var(--app-accent);
+}
+
+.progressbar > div {
+  transition: width .2s ease, background-color .2s ease;
 }
