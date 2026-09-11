@@ -1,180 +1,3333 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ensureAnonymousUser } from "../lib/auth";
+import { registerPushSubscription } from "../lib/push";
+import { supabase } from "../lib/supabase";
 
 type MainTab = "Hoje" | "Calendário" | "Hábitos" | "Mais";
 type MoreTab = "Ritmo" | "Tarefas" | "Eisenhower" | "Foco" | "Contagens" | "Ideias" | "Perfil";
 type Priority = 0 | 1 | 2 | 3;
-type Category = "Profissional" | "Pessoal" | "Saúde" | "Criatividade" | "Estudos" | "Casa";
+type Recurrence = "none" | "daily" | "weekly" | "monthly" | "custom";
+type HabitFrequency = "daily" | "weekly" | "monthly" | "custom";
+type DayPeriod = "Manhã" | "Tarde" | "Noite" | "Outro";
+
+type CategoryDef = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+type Step = { id: string; text: string; done: boolean };
+
 type Task = {
-  id:string; title:string; notes:string; date:string; start?:string; minutes:number; category:Category; priority:Priority;
-  done:boolean; tags:string[]; list:string; project?:string; recurring:"none"|"daily"|"weekly"|"monthly";
-  reminder?:string; steps:{id:string;text:string;done:boolean}[];
+  id: string;
+  title: string;
+  notes: string;
+  date: string;
+  start?: string;
+  minutes: number;
+  category: string;
+  priority: Priority;
+  done: boolean;
+  tags: string[];
+  project?: string;
+  recurring: Recurrence;
+  recurrenceDays: number[];
+  recurrenceEnd?: string;
+  reminder?: string;
+  steps: Step[];
 };
-type Habit = { id:string; title:string; category:Category; goal:number; unit:string; days:number[]; logs:Record<string,number>; };
-type Idea = { id:string; title:string; note:string; category:Category; };
-type Countdown = { id:string; title:string; date:string; category:Category; };
+
+type Habit = {
+  id: string;
+  title: string;
+  category: string;
+  frequency: HabitFrequency;
+  days: number[];
+  goal: number;
+  unit: string;
+  logs: Record<string, number>;
+  time?: string;
+  minutes?: number;
+  period?: DayPeriod;
+  startDate: string;
+  endDate?: string;
+  reminder?: string;
+  archived?: boolean;
+};
+
+type Idea = {
+  id: string;
+  title: string;
+  note: string;
+  category: string;
+  tags: string[];
+};
+
+type Countdown = {
+  id: string;
+  title: string;
+  date: string;
+  category: string;
+};
+
 type AppState = {
-  appName:string; userName:string; accent:string; tasks:Task[]; habits:Habit[]; ideas:Idea[]; countdowns:Countdown[];
+  appName: string;
+  userName: string;
+  accent: string;
+  categories: CategoryDef[];
+  tasks: Task[];
+  habits: Habit[];
+  ideas: Idea[];
+  countdowns: Countdown[];
 };
 
-const COLORS:Record<Category,string> = {
-  Profissional:"#6585c2", Pessoal:"#da8b78", Saúde:"#68a88b", Criatividade:"#d2a54e", Estudos:"#8b7db7", Casa:"#9b88a5"
+const DEFAULT_CATEGORIES: CategoryDef[] = [
+  { id: "profissional", name: "Profissional", color: "#6585c2" },
+  { id: "pessoal", name: "Pessoal", color: "#da8b78" },
+  { id: "saude", name: "Saúde", color: "#68a88b" },
+  { id: "criatividade", name: "Criatividade", color: "#d2a54e" },
+  { id: "estudos", name: "Estudos", color: "#8b7db7" },
+  { id: "casa", name: "Casa", color: "#9b88a5" },
+];
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+const iso = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const offsetISO = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return iso(d);
 };
-const BG:Record<Category,string> = {
-  Profissional:"#e8eef8", Pessoal:"#f6ded6", Saúde:"#e3efe8", Criatividade:"#f8edcf", Estudos:"#ece8f5", Casa:"#eee8f0"
+const fmtShort = (date: string) =>
+  new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(
+    new Date(`${date}T12:00:00`)
+  );
+const startOfWeek = (d: Date) => {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7;
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
 };
-const categories = Object.keys(COLORS) as Category[];
-const uid = () => Math.random().toString(36).slice(2,10);
-const iso = (d=new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-const offsetISO = (n:number) => { const d=new Date(); d.setDate(d.getDate()+n); return iso(d); };
-const fmtShort = (date:string) => new Intl.DateTimeFormat("pt-BR",{day:"2-digit",month:"short"}).format(new Date(`${date}T12:00:00`));
-const startOfWeek = (d:Date) => { const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; };
-const between = (date:string, start:Date, end:Date) => { const d=new Date(`${date}T12:00:00`); return d>=start && d<=end; };
+const between = (date: string, start: Date, end: Date) => {
+  const d = new Date(`${date}T12:00:00`);
+  return d >= start && d <= end;
+};
+const catColor = (defs: CategoryDef[], name: string) =>
+  defs.find((c) => c.name === name)?.color || "#8b939b";
+const catBg = (defs: CategoryDef[], name: string) => `${catColor(defs, name)}20`;
+const firstCategory = (state: AppState) => state.categories[0]?.name || "Pessoal";
+const durationLabel = (minutes: number) => {
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
+};
+const WEEKDAYS = [
+  { n: 0, label: "dom" },
+  { n: 1, label: "seg" },
+  { n: 2, label: "ter" },
+  { n: 3, label: "qua" },
+  { n: 4, label: "qui" },
+  { n: 5, label: "sex" },
+  { n: 6, label: "sáb" },
+];
 
-const seed:AppState = {
-  appName:"Meu Ritmo", userName:"Pâmela", accent:"#24364b",
-  tasks:[],
-  habits:[],
-  ideas:[],
-  countdowns:[]
+const seed: AppState = {
+  appName: "Meu Ritmo",
+  userName: "Pâmela",
+  accent: "#24364b",
+  categories: DEFAULT_CATEGORIES,
+  tasks: [],
+  habits: [],
+  ideas: [],
+  countdowns: [],
 };
 
-export default function Home(){
-  const [state,setState] = useState<AppState>(seed);
-  const [tab,setTab] = useState<MainTab>("Hoje");
-  const [more,setMore] = useState<MoreTab>("Ritmo");
-  const [hydrated,setHydrated] = useState(false);
-  const [composer,setComposer] = useState(false);
-  const [editTask,setEditTask] = useState<Task|null>(null);
-  const [focusTask,setFocusTask] = useState<Task|null>(null);
-  const [focusSecs,setFocusSecs] = useState(0);
-  const [running,setRunning] = useState(false);
+function migrateState(raw: any): AppState {
+  const categories =
+    Array.isArray(raw?.categories) && raw.categories.length
+      ? raw.categories
+      : DEFAULT_CATEGORIES;
 
-  useEffect(()=>{ const raw=localStorage.getItem("meu-ritmo-v2.3"); if(raw){try{setState(JSON.parse(raw));}catch{}} setHydrated(true); },[]);
-  useEffect(()=>{ if(hydrated) localStorage.setItem("meu-ritmo-v2.3",JSON.stringify(state)); },[state,hydrated]);
-  useEffect(()=>{ if(!running||focusSecs<=0)return; const x=setInterval(()=>setFocusSecs(s=>s-1),1000); return()=>clearInterval(x); },[running,focusSecs]);
-  useEffect(()=>{ if(focusSecs===0) setRunning(false); },[focusSecs]);
+  const fallbackCategory = categories[0]?.name || "Pessoal";
 
-  const toggleTask=(id:string)=>setState(s=>({...s,tasks:s.tasks.map(t=>t.id===id?{...t,done:!t.done}:t)}));
-  const deleteTask=(id:string)=>setState(s=>({...s,tasks:s.tasks.filter(t=>t.id!==id)}));
-  const saveTask=(task:Task)=>setState(s=>({...s,tasks:s.tasks.some(t=>t.id===task.id)?s.tasks.map(t=>t.id===task.id?task:t):[...s.tasks,task]}));
-  const startFocus=(task:Task)=>{setFocusTask(task);setFocusSecs(Math.max(task.minutes,1)*60);setRunning(true);};
+  return {
+    ...seed,
+    ...raw,
+    categories,
+    tasks: Array.isArray(raw?.tasks)
+      ? raw.tasks.map((t: any) => ({
+          ...t,
+          category: t.category || fallbackCategory,
+          project: t.project || "",
+          recurring: t.recurring || "none",
+          recurrenceDays: Array.isArray(t.recurrenceDays) ? t.recurrenceDays : [],
+          recurrenceEnd: t.recurrenceEnd || "",
+          reminder: t.reminder || "none",
+          steps: Array.isArray(t.steps) ? t.steps : [],
+          tags: Array.isArray(t.tags) ? t.tags : [],
+        }))
+      : [],
+    habits: Array.isArray(raw?.habits)
+      ? raw.habits.map((h: any) => ({
+          ...h,
+          category: h.category || fallbackCategory,
+          frequency: h.frequency || "daily",
+          days: Array.isArray(h.days) ? h.days : [0, 1, 2, 3, 4, 5, 6],
+          startDate: h.startDate || iso(),
+          reminder: h.reminder || "none",
+          period: h.period || "Outro",
+          logs: h.logs || {},
+        }))
+      : [],
+    ideas: Array.isArray(raw?.ideas)
+      ? raw.ideas.map((i: any) => ({
+          ...i,
+          category: i.category || fallbackCategory,
+          tags: Array.isArray(i.tags) ? i.tags : [],
+        }))
+      : [],
+    countdowns: Array.isArray(raw?.countdowns)
+      ? raw.countdowns.map((c: any) => ({
+          ...c,
+          category: c.category || fallbackCategory,
+        }))
+      : [],
+  };
+}
 
-  return <main className="min-h-screen px-3 py-4 sm:py-8">
-    <div className="phone-shell mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-[440px] flex-col overflow-hidden rounded-[34px] border border-white/80 bg-[#fffdf9] sm:min-h-[820px]">
-      <section className="relative flex min-h-0 flex-1 flex-col">
-        <div className="flex-1 overflow-y-auto px-5 pb-7 pt-5 sm:px-6">
-          <TopBar state={state} onProfile={()=>{setTab("Mais");setMore("Perfil");}} />
-          {tab==="Hoje" && <Today state={state} setState={setState} toggleTask={toggleTask} edit={setEditTask} startFocus={startFocus} />}
-          {tab==="Calendário" && <CalendarView tasks={state.tasks} toggleTask={toggleTask} edit={setEditTask} />}
-          {tab==="Hábitos" && <HabitsView state={state} setState={setState} />}
-          {tab==="Mais" && <MoreHub active={more} setActive={setMore} state={state} setState={setState} toggleTask={toggleTask} edit={setEditTask} startFocus={startFocus} />}
+export default function Home() {
+  const [state, setState] = useState<AppState>(seed);
+  const [tab, setTab] = useState<MainTab>("Hoje");
+  const [more, setMore] = useState<MoreTab>("Ritmo");
+  const [hydrated, setHydrated] = useState(false);
+
+  const [composer, setComposer] = useState(false);
+  const [editTask, setEditTask] = useState<Task | null>(null);
+  const [taskInitial, setTaskInitial] = useState<Partial<Task> | null>(null);
+  const [sourceIdeaId, setSourceIdeaId] = useState<string | null>(null);
+
+  const [focusTask, setFocusTask] = useState<Task | null>(null);
+  const [focusSecs, setFocusSecs] = useState(0);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    ensureAnonymousUser();
+  }, []);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("meu-ritmo-v2.3");
+    if (raw) {
+      try {
+        setState(migrateState(JSON.parse(raw)));
+      } catch {}
+    }
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (hydrated) localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(state));
+  }, [state, hydrated]);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!running || focusSecs <= 0) return;
+    const x = setInterval(() => setFocusSecs((s) => s - 1), 1000);
+    return () => clearInterval(x);
+  }, [running, focusSecs]);
+
+  useEffect(() => {
+    if (focusSecs === 0) setRunning(false);
+  }, [focusSecs]);
+
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<{
+        id: string;
+        value: number;
+        date: string;
+      }>;
+
+      setState((s) => ({
+        ...s,
+        habits: s.habits.map((h) =>
+          h.id === custom.detail.id
+            ? {
+                ...h,
+                logs: {
+                  ...h.logs,
+                  [custom.detail.date]: custom.detail.value,
+                },
+              }
+            : h
+        ),
+      }));
+    };
+
+    window.addEventListener("meu-ritmo-toggle-habit", handler);
+    return () => window.removeEventListener("meu-ritmo-toggle-habit", handler);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !hydrated ||
+      !("Notification" in window) ||
+      Notification.permission !== "granted"
+    )
+      return;
+
+    const check = async () => {
+      const now = new Date();
+      const stamp = `${iso(now)}-${String(now.getHours()).padStart(2, "0")}:${String(
+        now.getMinutes()
+      ).padStart(2, "0")}`;
+      const sent = JSON.parse(
+        localStorage.getItem("meu-ritmo-notified") || "[]"
+      ) as string[];
+
+      for (const t of state.tasks) {
+        if (
+          t.done ||
+          !t.start ||
+          !t.reminder ||
+          t.reminder === "none"
+        )
+          continue;
+
+        const minsBefore = Number(t.reminder) || 0;
+        const target = new Date(`${t.date}T${t.start}:00`);
+        target.setMinutes(target.getMinutes() - minsBefore);
+        const targetStamp = `${iso(target)}-${String(target.getHours()).padStart(
+          2,
+          "0"
+        )}:${String(target.getMinutes()).padStart(2, "0")}`;
+        const key = `${t.id}-${targetStamp}`;
+
+        if (stamp === targetStamp && !sent.includes(key)) {
+          const reg = await navigator.serviceWorker.ready;
+          await reg.showNotification("Meu Ritmo", {
+            body: `${t.title}${
+              minsBefore ? ` começa em ${minsBefore} min` : " começa agora"
+            }.`,
+            icon: "/icon-192.png",
+            badge: "/icon-192.png",
+            tag: key,
+          });
+          localStorage.setItem(
+            "meu-ritmo-notified",
+            JSON.stringify([...sent, key].slice(-100))
+          );
+        }
+      }
+    };
+
+    check();
+    const timer = setInterval(check, 30000);
+    return () => clearInterval(timer);
+  }, [hydrated, state.tasks]);
+
+  const toggleTask = (id: string) =>
+    setState((s) => ({
+      ...s,
+      tasks: s.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
+    }));
+
+  const deleteTask = (id: string) =>
+    setState((s) => ({ ...s, tasks: s.tasks.filter((t) => t.id !== id) }));
+
+  const saveTask = (task: Task) =>
+    setState((s) => ({
+      ...s,
+      tasks: s.tasks.some((t) => t.id === task.id)
+        ? s.tasks.map((t) => (t.id === task.id ? task : t))
+        : [...s.tasks, task],
+      ideas: sourceIdeaId
+        ? s.ideas.filter((i) => i.id !== sourceIdeaId)
+        : s.ideas,
+    }));
+
+  const startFocus = (task: Task) => {
+    setFocusTask(task);
+    setFocusSecs(Math.max(task.minutes, 1) * 60);
+    setRunning(true);
+  };
+
+  const openIdeaAsTask = (idea: Idea) => {
+    setTaskInitial({
+      title: idea.title,
+      notes: idea.note,
+      category: idea.category,
+      tags: idea.tags,
+      minutes: 30,
+      date: iso(),
+      priority: 1,
+      recurring: "none",
+      recurrenceDays: [],
+      reminder: "none",
+      steps: [],
+    });
+    setSourceIdeaId(idea.id);
+    setComposer(true);
+  };
+
+  const closeComposer = () => {
+    setComposer(false);
+    setTaskInitial(null);
+    setSourceIdeaId(null);
+  };
+
+  return (
+    <main className="min-h-screen px-3 py-4 sm:py-8">
+      <div className="phone-shell mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-[440px] flex-col overflow-hidden rounded-[34px] border border-white/80 bg-[#fffdf9] sm:min-h-[820px]">
+        <section className="relative flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 overflow-y-auto px-5 pb-7 pt-5 sm:px-6">
+            <TopBar
+              state={state}
+              onProfile={() => {
+                setTab("Mais");
+                setMore("Perfil");
+              }}
+            />
+
+            {tab === "Hoje" && (
+              <Today
+                state={state}
+                toggleTask={toggleTask}
+                edit={setEditTask}
+              />
+            )}
+
+            {tab === "Calendário" && (
+              <CalendarView
+                state={state}
+                toggleTask={toggleTask}
+                edit={setEditTask}
+              />
+            )}
+
+            {tab === "Hábitos" && (
+              <HabitsView state={state} setState={setState} />
+            )}
+
+            {tab === "Mais" && (
+              <MoreHub
+                active={more}
+                setActive={setMore}
+                state={state}
+                setState={setState}
+                toggleTask={toggleTask}
+                edit={setEditTask}
+                startFocus={startFocus}
+                convertIdea={openIdeaAsTask}
+              />
+            )}
+          </div>
+
+          <BottomNav
+            tab={tab}
+            setTab={setTab}
+            onAdd={() => {
+              setTaskInitial(null);
+              setSourceIdeaId(null);
+              setComposer(true);
+            }}
+          />
+        </section>
+      </div>
+
+      {composer && (
+        <TaskComposer
+          state={state}
+          initial={taskInitial || undefined}
+          close={closeComposer}
+          save={(t) => {
+            saveTask(t);
+            closeComposer();
+          }}
+        />
+      )}
+
+      {editTask && (
+        <TaskComposer
+          state={state}
+          task={editTask}
+          close={() => setEditTask(null)}
+          save={(t) => {
+            saveTask(t);
+            setEditTask(null);
+          }}
+          remove={() => {
+            deleteTask(editTask.id);
+            setEditTask(null);
+          }}
+        />
+      )}
+
+      {focusTask && (
+        <FocusSheet
+          task={focusTask}
+          state={state}
+          secs={focusSecs}
+          running={running}
+          toggle={() => setRunning((r) => !r)}
+          close={() => {
+            setFocusTask(null);
+            setRunning(false);
+          }}
+          finish={() => {
+            setState((s) => ({
+              ...s,
+              tasks: s.tasks.map((t) =>
+                t.id === focusTask.id ? { ...t, done: true } : t
+              ),
+            }));
+            setFocusTask(null);
+            setRunning(false);
+          }}
+        />
+      )}
+    </main>
+  );
+}
+
+function TopBar({
+  state,
+  onProfile,
+}: {
+  state: AppState;
+  onProfile: () => void;
+}) {
+  return (
+    <div className="mb-5 flex items-center justify-between">
+      <div className="flex items-center gap-2.5">
+        <div
+          className="grid h-10 w-10 place-items-center rounded-2xl text-lg font-bold text-white"
+          style={{ background: state.accent }}
+        >
+          ↗
         </div>
-        <BottomNav tab={tab} setTab={setTab} onAdd={()=>setComposer(true)} />
+        <div>
+          <div className="text-[18px] font-semibold leading-none tracking-tight">
+            {state.appName}
+          </div>
+          <div className="mt-1 text-[10px] uppercase tracking-[.14em] text-[#8a929c]">
+            um pouco por vez
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={onProfile}
+        className="grid h-9 w-9 place-items-center rounded-full border border-[#ded8cf] bg-white text-xs font-semibold"
+      >
+        {state.userName.trim().charAt(0).toUpperCase() || "P"}
+      </button>
+    </div>
+  );
+}
+
+function BottomNav({
+  tab,
+  setTab,
+  onAdd,
+}: {
+  tab: MainTab;
+  setTab: (t: MainTab) => void;
+  onAdd: () => void;
+}) {
+  const item = (name: MainTab, icon: string) => (
+    <button
+      onClick={() => setTab(name)}
+      className={`nav-item ${tab === name ? "active" : ""}`}
+    >
+      <span className="nav-icon">{icon}</span>
+      <span>{name}</span>
+    </button>
+  );
+
+  return (
+    <nav className="sticky bottom-0 z-30 mt-auto border-t border-[#e2ddd5] bg-[#fffdf9]/95 px-2 pb-2 pt-2 backdrop-blur">
+      <div className="grid grid-cols-5 items-end">
+        {item("Hoje", "⌂")}
+        {item("Calendário", "▦")}
+        <button className="fab" onClick={onAdd}>
+          ＋
+        </button>
+        {item("Hábitos", "✓")}
+        {item("Mais", "•••")}
+      </div>
+    </nav>
+  );
+}
+
+function Today({
+  state,
+  toggleTask,
+  edit,
+}: {
+  state: AppState;
+  toggleTask: (id: string) => void;
+  edit: (t: Task) => void;
+}) {
+  const today = iso();
+  const tasksToday = [...state.tasks]
+    .filter((t) => t.date === today)
+    .sort((a, b) => {
+      if (a.done !== b.done) return Number(a.done) - Number(b.done);
+      if (a.start && b.start) return a.start.localeCompare(b.start);
+      if (a.start) return -1;
+      if (b.start) return 1;
+      return b.priority - a.priority;
+    });
+
+  const dayIndex = new Date().getDay();
+  const habitsToday = state.habits
+    .filter((h) => !h.archived)
+    .filter((h) => {
+      if (h.startDate && today < h.startDate) return false;
+      if (h.endDate && today > h.endDate) return false;
+      if (h.frequency === "daily") return true;
+      if (h.frequency === "weekly" || h.frequency === "custom") {
+        return h.days.includes(dayIndex);
+      }
+      if (h.frequency === "monthly") {
+        const startDay = new Date(`${h.startDate}T12:00:00`).getDate();
+        return new Date().getDate() === startDay;
+      }
+      return false;
+    })
+    .sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+
+  const completedTasks = tasksToday.filter((t) => t.done).length;
+  const completedHabits = habitsToday.filter(
+    (h) => (h.logs[today] || 0) >= h.goal
+  ).length;
+
+  const toggleHabit = (habit: Habit) => {
+    setTimeout(() => {}, 0);
+  };
+
+  return (
+    <div>
+      <header className="mb-5">
+        <p className="text-xs capitalize text-[#87909a]">
+          {new Intl.DateTimeFormat("pt-BR", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+          }).format(new Date())}
+        </p>
+        <h1 className="mt-1 text-[29px] font-semibold tracking-tight">
+          Hoje
+        </h1>
+        <p className="mt-1 text-[13px] text-[#7d8794]">
+          Vai fazendo no seu ritmo e marcando o que concluir.
+        </p>
+      </header>
+
+      <section className="mb-5">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">
+            Tarefas
+          </div>
+          <span className="text-[11px] text-[#88919b]">
+            {completedTasks}/{tasksToday.length}
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {tasksToday.map((t) => (
+            <TaskRow
+              key={t.id}
+              task={t}
+              defs={state.categories}
+              toggle={toggleTask}
+              edit={edit}
+            />
+          ))}
+        </div>
+
+        {!tasksToday.length && (
+          <section className="soft-card p-4 text-center">
+            <div className="text-sm font-semibold">Nenhuma tarefa para hoje</div>
+            <p className="mt-1 text-xs text-[#7e8790]">
+              Seu dia está livre por enquanto.
+            </p>
+          </section>
+        )}
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">
+            Hábitos
+          </div>
+          <span className="text-[11px] text-[#88919b]">
+            {completedHabits}/{habitsToday.length}
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {habitsToday.map((h) => {
+            const current = h.logs[today] || 0;
+            const done = current >= h.goal;
+
+            return (
+              <div
+                key={h.id}
+                className="flex items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3"
+              >
+                <button
+                  onClick={() =>
+                    state &&
+                    (state as any) &&
+                    null
+                  }
+                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
+                    done ? "bg-[#24364b] text-white" : ""
+                  }`}
+                >
+                  {done ? "✓" : ""}
+                </button>
+
+                <div className="min-w-0 flex-1">
+                  <div
+                    className={`truncate text-sm font-semibold ${
+                      done ? "line-through text-[#9aa1a8]" : ""
+                    }`}
+                  >
+                    {h.title}
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#88919b]">
+                    Hábito
+                    {h.time ? ` · ${h.time}` : ""}
+                    {h.minutes ? ` · ${durationLabel(h.minutes)}` : ""}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    const nextValue = done ? 0 : h.goal;
+                    // local state is updated through the same state object used by the app
+                    window.dispatchEvent(
+                      new CustomEvent("meu-ritmo-toggle-habit", {
+                        detail: { id: h.id, value: nextValue, date: today },
+                      })
+                    );
+                  }}
+                  className="rounded-xl border border-[#ddd7cf] px-3 py-2 text-[11px] font-bold"
+                >
+                  {done ? "Desmarcar" : "Concluir"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {!habitsToday.length && (
+          <section className="soft-card p-4 text-center">
+            <div className="text-sm font-semibold">Nenhum hábito para hoje</div>
+            <p className="mt-1 text-xs text-[#7e8790]">
+              Só aparecem aqui os hábitos previstos para este dia.
+            </p>
+          </section>
+        )}
       </section>
     </div>
-    {composer && <TaskComposer close={()=>setComposer(false)} save={(t)=>{saveTask(t);setComposer(false);}} />}
-    {editTask && <TaskComposer task={editTask} close={()=>setEditTask(null)} save={(t)=>{saveTask(t);setEditTask(null);}} remove={()=>{deleteTask(editTask.id);setEditTask(null);}} />}
-    {focusTask && <FocusSheet task={focusTask} secs={focusSecs} running={running} toggle={()=>setRunning(r=>!r)} close={()=>{setFocusTask(null);setRunning(false);}} finish={()=>{setState(s=>({...s,tasks:s.tasks.map(t=>t.id===focusTask.id?{...t,done:true}:t)}));setFocusTask(null);setRunning(false);}} />}
-  </main>;
+  );
 }
 
-function TopBar({state,onProfile}:{state:AppState;onProfile:()=>void}){
-  return <div className="mb-5 flex items-center justify-between"><div className="flex items-center gap-2.5"><div className="grid h-10 w-10 place-items-center rounded-2xl text-lg font-bold text-white" style={{background:state.accent}}>↗</div><div><div className="text-[18px] font-semibold leading-none tracking-tight">{state.appName}</div><div className="mt-1 text-[10px] uppercase tracking-[.14em] text-[#8a929c]">um pouco por vez</div></div></div><button onClick={onProfile} className="grid h-9 w-9 place-items-center rounded-full border border-[#ded8cf] bg-white text-xs font-semibold">{state.userName.trim().charAt(0).toUpperCase()||"P"}</button></div>;
+function pickTasks(tasks: Task[], limit: number) {
+  const out: Task[] = [];
+  let used = 0;
+  for (const t of tasks) {
+    if (used + t.minutes <= limit) {
+      out.push(t);
+      used += t.minutes;
+    }
+  }
+  return out.length ? out : tasks.filter((t) => t.minutes <= limit).slice(0, 1);
 }
 
-function BottomNav({tab,setTab,onAdd}:{tab:MainTab;setTab:(t:MainTab)=>void;onAdd:()=>void}){
-  const item=(name:MainTab,icon:string)=><button onClick={()=>setTab(name)} className={`nav-item ${tab===name?"active":""}`}><span className="nav-icon">{icon}</span><span>{name}</span></button>;
-  return <nav className="sticky bottom-0 z-30 mt-auto border-t border-[#e2ddd5] bg-[#fffdf9]/95 px-2 pb-2 pt-2 backdrop-blur"><div className="grid grid-cols-5 items-end">{item("Hoje","⌂")}{item("Calendário","▦")}<button className="fab" onClick={onAdd}>＋</button>{item("Hábitos","✓")}{item("Mais","•••")}</div></nav>;
+function FreeTime({ ideas }: { ideas: Idea[] }) {
+  return (
+    <section className="card mb-5 p-4">
+      <div className="text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">
+        Seu tempo está livre
+      </div>
+      <h2 className="mt-2 text-xl font-semibold">
+        Quer fazer algo só porque gosta?
+      </h2>
+      <p className="mt-2 text-sm leading-5 text-[#7d8794]">
+        Descansar também vale. Se quiser uma ideia, aqui vai uma das suas.
+      </p>
+      {ideas[0] && (
+        <div className="mt-4 rounded-2xl bg-[#f8edcf] p-3 text-sm font-semibold">
+          ✦ {ideas[0].title}
+        </div>
+      )}
+    </section>
+  );
 }
 
-function Today({state,setState,toggleTask,edit,startFocus}:{state:AppState;setState:any;toggleTask:(id:string)=>void;edit:(t:Task)=>void;startFocus:(t:Task)=>void}){
-  const [minutes,setMinutes]=useState(30);
-  const today=state.tasks.filter(t=>t.date===iso());
-  const undone=today.filter(t=>!t.done).sort((a,b)=>b.priority-a.priority||a.minutes-b.minutes);
-  const done=today.filter(t=>t.done).length;
-  const suggestion=pickTasks(undone,minutes);
-  const next=suggestion[0]||undone[0];
-  const urgent=undone.filter(t=>t.priority===3).length;
-  const hobbyIdeas=state.ideas.filter(i=>i.category==="Criatividade"||i.category==="Pessoal");
-  return <div>
-    <header className="mb-5"><p className="text-xs capitalize text-[#87909a]">{new Intl.DateTimeFormat("pt-BR",{weekday:"long",day:"numeric",month:"long"}).format(new Date())}</p><h1 className="mt-1 text-[29px] font-semibold tracking-tight">Boa noite, {state.userName}!</h1><p className="mt-1 text-[13px] text-[#7d8794]">Vamos escolher só o que cabe agora.</p></header>
-
-    <section className="soft-card mb-5 p-4"><div className="mb-3 flex items-start justify-between gap-3"><div><h2 className="text-[14px] font-semibold">Quanto tempo você tem?</h2><p className="mt-1 text-[11px] text-[#7d8794]">Eu combino prioridade + duração para sugerir.</p></div>{urgent>0&&<span className="chip bg-[#f6ded6] text-[#8e5547]">{urgent} prioridade(s)</span>}</div><div className="grid grid-cols-4 gap-1.5">{[15,30,60,90].map(m=><button key={m} onClick={()=>setMinutes(m)} className={`rounded-[14px] px-1 py-2.5 text-[12px] font-semibold ${minutes===m?"text-white":"bg-white"}`} style={minutes===m?{background:state.accent}:{}}>{m===90?"+1h":m===60?"1h":`${m} min`}</button>)}</div></section>
-
-    <div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">Próximo passo</p><span className="text-[11px] text-[#88919b]">{suggestion.reduce((n,t)=>n+t.minutes,0)} min sugeridos</span></div>
-    {next ? <section className="card mb-5 p-4"><div className="flex items-center justify-between"><CategoryChip c={next.category}/><PriorityDots p={next.priority}/></div><button className="mt-4 block text-left" onClick={()=>edit(next)}><h2 className="text-[21px] font-semibold leading-tight">{next.title}</h2>{next.project&&<p className="mt-1 text-xs text-[#7d8794]">{next.project}</p>}</button><div className="mt-4 flex items-center gap-2 text-xs text-[#7d8794]"><span>◷ {next.minutes} min</span>{next.start&&<span>• {next.start}</span>}{next.tags.length>0&&<span>• #{next.tags[0]}</span>}</div><div className="mt-5 flex gap-2"><button onClick={()=>startFocus(next)} className="flex-1 rounded-[14px] px-4 py-3 text-[13px] font-bold text-white" style={{background:state.accent}}>▶ Focar</button><button onClick={()=>toggleTask(next.id)} className="rounded-[14px] border border-[#ddd7cf] px-4 py-3 text-[13px] font-bold">Concluir</button></div></section> : <FreeTime ideas={hobbyIdeas} />}
-
-    {suggestion.length>1&&<section className="mb-5"><div className="mb-2 text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">Depois disso</div><div className="space-y-2">{suggestion.slice(1).map(t=><TaskRow key={t.id} task={t} toggle={toggleTask} edit={edit}/>)}</div></section>}
-
-    <section className="soft-card p-4"><div className="mb-3 flex items-end justify-between"><div><div className="text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">Seu dia</div><div className="mt-1 text-lg font-semibold">{done} de {today.length} concluídas</div></div><strong className="text-xl">{today.length?Math.round(done/today.length*100):0}%</strong></div><div className="progressbar"><div style={{width:`${today.length?done/today.length*100:0}%`,background:state.accent}}/></div></section>
-  </div>;
+function TaskRow({
+  task,
+  defs,
+  toggle,
+  edit,
+}: {
+  task: Task;
+  defs: CategoryDef[];
+  toggle: (id: string) => void;
+  edit: (t: Task) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3">
+      <button
+        onClick={() => toggle(task.id)}
+        className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${
+          task.done ? "bg-[#24364b] text-white" : ""
+        }`}
+      >
+        {task.done ? "✓" : ""}
+      </button>
+      <button onClick={() => edit(task)} className="min-w-0 flex-1 text-left">
+        <div
+          className={`truncate text-sm font-semibold ${
+            task.done ? "line-through text-[#9aa1a8]" : ""
+          }`}
+        >
+          {task.title}
+        </div>
+        <div className="mt-1 text-[11px] text-[#88919b]">
+          {task.category}
+          {task.minutes > 0 ? ` · ${durationLabel(task.minutes)}` : ""}
+          {task.start ? ` · ${task.start}` : ""}
+          {task.steps.length ? ` · ${task.steps.filter((s) => s.done).length}/${task.steps.length} etapas` : ""}
+        </div>
+      </button>
+      <span
+        className="h-2.5 w-2.5 rounded-full"
+        style={{ background: catColor(defs, task.category) }}
+      />
+    </div>
+  );
 }
 
-function pickTasks(tasks:Task[],limit:number){ const out:Task[]=[]; let used=0; for(const t of tasks){ if(used+t.minutes<=limit){out.push(t);used+=t.minutes;} } return out.length?out:tasks.filter(t=>t.minutes<=limit).slice(0,1); }
-function FreeTime({ideas}:{ideas:Idea[]}){ return <section className="card mb-5 p-4"><div className="text-[11px] font-bold uppercase tracking-[.16em] text-[#88919b]">Seu tempo está livre</div><h2 className="mt-2 text-xl font-semibold">Quer fazer algo só porque gosta?</h2><p className="mt-2 text-sm leading-5 text-[#7d8794]">Descansar também vale. Se quiser uma ideia, aqui vai uma das suas.</p>{ideas[0]&&<div className="mt-4 rounded-2xl bg-[#f8edcf] p-3 text-sm font-semibold">✦ {ideas[0].title}</div>}</section>; }
-
-function TaskRow({task,toggle,edit}:{task:Task;toggle:(id:string)=>void;edit:(t:Task)=>void}){return <div className="flex items-center gap-3 rounded-2xl border border-[#e2ddd5] bg-white p-3"><button onClick={()=>toggle(task.id)} className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs ${task.done?"bg-[#24364b] text-white":""}`}>{task.done?"✓":""}</button><button onClick={()=>edit(task)} className="min-w-0 flex-1 text-left"><div className={`truncate text-sm font-semibold ${task.done?"line-through text-[#9aa1a8]":""}`}>{task.title}</div><div className="mt-1 text-[11px] text-[#88919b]">{task.category} · {task.minutes} min {task.start?`· ${task.start}`:""}</div></button><PriorityDots p={task.priority}/></div>}
-
-function PriorityDots({p}:{p:Priority}){ const c=p===3?"#d76c5d":p===2?"#d7a64c":p===1?"#6a9c7e":"#c6c8ca"; return <div className="flex gap-1" title={`Prioridade ${p}`}>{[1,2,3].map(x=><span key={x} className="h-1.5 w-1.5 rounded-full" style={{background:x<=p?c:"#e3e0dc"}}/>)}</div> }
-function CategoryChip({c}:{c:Category}){return <span className="chip" style={{background:BG[c],color:COLORS[c]}}>{c}</span>}
-
-function CalendarView({tasks,toggleTask,edit}:{tasks:Task[];toggleTask:(id:string)=>void;edit:(t:Task)=>void}){
-  const [mode,setMode]=useState<"Mês"|"Semana"|"Agenda">("Mês");
-  const [cursor,setCursor]=useState(new Date());
-  return <div><SectionTitle title="Calendário" subtitle="Veja o tempo antes de lotar o dia."/><div className="segment mb-4">{(["Mês","Semana","Agenda"] as const).map(m=><button key={m} className={mode===m?"active":""} onClick={()=>setMode(m)}>{m}</button>)}</div><div className="mb-4 flex items-center justify-between"><button className="rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm" onClick={()=>setCursor(d=>shiftCursor(d,mode,-1))}>‹</button><strong className="text-sm capitalize">{calendarLabel(cursor,mode)}</strong><button className="rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm" onClick={()=>setCursor(d=>shiftCursor(d,mode,1))}>›</button></div>{mode==="Mês"?<MonthGrid cursor={cursor} tasks={tasks} edit={edit}/>:mode==="Semana"?<WeekGrid cursor={cursor} tasks={tasks} edit={edit}/>:<Agenda cursor={cursor} tasks={tasks} toggle={toggleTask} edit={edit}/>}</div>;
-}
-function shiftCursor(d:Date,mode:string,n:number){ const x=new Date(d); if(mode==="Mês")x.setMonth(x.getMonth()+n); else x.setDate(x.getDate()+n*(mode==="Semana"?7:1)); return x; }
-function calendarLabel(d:Date,mode:string){return mode==="Mês"?new Intl.DateTimeFormat("pt-BR",{month:"long",year:"numeric"}).format(d):mode==="Semana"?`Semana de ${fmtShort(iso(startOfWeek(d)))}`:new Intl.DateTimeFormat("pt-BR",{weekday:"long",day:"numeric",month:"long"}).format(d);}
-function MonthGrid({cursor,tasks,edit}:{cursor:Date;tasks:Task[];edit:(t:Task)=>void}){ const first=new Date(cursor.getFullYear(),cursor.getMonth(),1); const start=new Date(first); start.setDate(1-((first.getDay()+6)%7)); const days=Array.from({length:42},(_,i)=>{const d=new Date(start);d.setDate(start.getDate()+i);return d}); return <div><div className="mb-1 grid grid-cols-7 text-center text-[10px] font-bold uppercase text-[#9199a1]">{["S","T","Q","Q","S","S","D"].map((x,i)=><div key={i}>{x}</div>)}</div><div className="grid grid-cols-7 gap-1">{days.map(d=>{const ds=iso(d), list=tasks.filter(t=>t.date===ds), dim=d.getMonth()!==cursor.getMonth();return <div key={ds} className={`min-h-[70px] rounded-xl border p-1.5 ${ds===iso()?"border-[#24364b] bg-white":"border-[#e4dfd8] bg-[#fffefa]"} ${dim?"opacity-35":""}`}><div className="text-[10px] font-bold">{d.getDate()}</div><div className="mt-1 space-y-1">{list.slice(0,3).map(t=><button key={t.id} onClick={()=>edit(t)} className="block h-1.5 w-full rounded-full" style={{background:COLORS[t.category],opacity:t.done?.35:1}} title={t.title}/>)}</div></div>})}</div></div> }
-function WeekGrid({cursor,tasks,edit}:{cursor:Date;tasks:Task[];edit:(t:Task)=>void}){ const start=startOfWeek(cursor); const days=Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(start.getDate()+i);return d}); return <div className="space-y-2">{days.map(d=>{const ds=iso(d), list=tasks.filter(t=>t.date===ds).sort((a,b)=>(a.start||"99").localeCompare(b.start||"99"));return <section key={ds} className="card p-3"><div className="mb-2 flex items-center justify-between"><strong className="text-sm capitalize">{new Intl.DateTimeFormat("pt-BR",{weekday:"short",day:"2-digit"}).format(d)}</strong><span className="text-[10px] text-[#8c949c]">{list.reduce((n,t)=>n+t.minutes,0)} min</span></div>{list.length?list.map(t=><button key={t.id} onClick={()=>edit(t)} className="mb-1 flex w-full items-center gap-2 rounded-xl bg-[#f8f4ee] p-2 text-left"><span className="h-7 w-1 rounded-full" style={{background:COLORS[t.category]}}/><div className="min-w-0 flex-1"><div className="truncate text-xs font-semibold">{t.title}</div><div className="text-[10px] text-[#8c949c]">{t.start||"Sem horário"} · {t.minutes} min</div></div></button>):<div className="py-2 text-xs text-[#a0a6ac]">Livre</div>}</section>})}</div> }
-function Agenda({cursor,tasks,toggle,edit}:{cursor:Date;tasks:Task[];toggle:(id:string)=>void;edit:(t:Task)=>void}){ const days=Array.from({length:14},(_,i)=>{const d=new Date(cursor);d.setDate(cursor.getDate()+i);return d}); return <div className="space-y-4">{days.map(d=>{const ds=iso(d),list=tasks.filter(t=>t.date===ds); if(!list.length)return null; return <div key={ds}><div className="mb-2 text-[11px] font-bold uppercase tracking-[.14em] text-[#8c949c]">{new Intl.DateTimeFormat("pt-BR",{weekday:"long",day:"numeric",month:"short"}).format(d)}</div><div className="space-y-2">{list.map(t=><TaskRow key={t.id} task={t} toggle={toggle} edit={edit}/>)}</div></div>})}</div> }
-
-function HabitsView({state,setState}:{state:AppState;setState:any}){
-  const [showAdd,setShowAdd]=useState(false);
-  const today=iso();
-  const log=(h:Habit,delta:number)=>setState((s:AppState)=>({...s,habits:s.habits.map(x=>x.id===h.id?{...x,logs:{...x.logs,[today]:Math.max(0,(x.logs[today]||0)+delta)}}:x)}));
-  return <div><SectionTitle title="Hábitos" subtitle="Consistência sem sequência punitiva." action={<button onClick={()=>setShowAdd(true)} className="rounded-xl bg-[#24364b] px-3 py-2 text-xs font-bold text-white">+ hábito</button>}/><div className="space-y-3">{state.habits.map(h=>{const val=h.logs[today]||0, pct=Math.min(100,val/h.goal*100); return <section key={h.id} className="card p-4"><div className="flex items-start justify-between"><div><CategoryChip c={h.category}/><h3 className="mt-3 text-base font-semibold">{h.title}</h3><p className="mt-1 text-xs text-[#87909a]">Meta: {h.goal} {h.unit}</p></div><div className="text-right"><div className="text-2xl font-semibold">{val}</div><div className="text-[10px] text-[#87909a]">{h.unit}</div></div></div><div className="mt-4 progressbar"><div style={{width:`${pct}%`,background:COLORS[h.category]}}/></div><div className="mt-4 flex gap-2"><button onClick={()=>log(h,-1)} className="flex-1 rounded-xl border border-[#ddd7cf] py-2 text-sm">−</button><button onClick={()=>log(h,1)} className="flex-1 rounded-xl bg-[#24364b] py-2 text-sm font-bold text-white">+ registrar</button></div><MiniHabitHistory h={h}/></section>})}</div>{showAdd&&<HabitComposer close={()=>setShowAdd(false)} save={(h)=>{setState((s:AppState)=>({...s,habits:[...s.habits,h]}));setShowAdd(false)}}/>}</div>;
-}
-function MiniHabitHistory({h}:{h:Habit}){ const days=Array.from({length:7},(_,i)=>offsetISO(i-6)); return <div className="mt-4 flex justify-between">{days.map(d=>{const done=(h.logs[d]||0)>=h.goal; return <div key={d} className="text-center"><div className={`mx-auto h-5 w-5 rounded-full ${done?"":"border border-[#ddd7cf]"}`} style={done?{background:COLORS[h.category]}:{}}/><div className="mt-1 text-[9px] text-[#969da4]">{new Intl.DateTimeFormat("pt-BR",{weekday:"narrow"}).format(new Date(`${d}T12:00:00`))}</div></div>})}</div> }
-
-function MoreHub({active,setActive,state,setState,toggleTask,edit,startFocus}:{active:MoreTab;setActive:(m:MoreTab)=>void;state:AppState;setState:any;toggleTask:(id:string)=>void;edit:(t:Task)=>void;startFocus:(t:Task)=>void}){
-  const items:[MoreTab,string][]=[["Ritmo","◉"],["Tarefas","☷"],["Eisenhower","⊞"],["Foco","◷"],["Contagens","⌛"],["Ideias","✦"],["Perfil","○"]];
-  return <div><div className="mb-5 flex flex-wrap gap-2">{items.map(([name,icon])=><button key={name} onClick={()=>setActive(name)} className={`rounded-full px-3 py-2 text-xs font-bold transition ${active===name?"bg-[#24364b] text-white shadow-sm":"border border-[#ddd7cf] bg-white text-[#68737e]"}`}>{icon} {name}</button>)}</div>{active==="Ritmo"&&<Rhythm state={state}/>} {active==="Tarefas"&&<TasksHub tasks={state.tasks} toggle={toggleTask} edit={edit}/>} {active==="Eisenhower"&&<Eisenhower tasks={state.tasks} edit={edit}/>} {active==="Foco"&&<FocusHub tasks={state.tasks} startFocus={startFocus}/>} {active==="Contagens"&&<Countdowns state={state} setState={setState}/>} {active==="Ideias"&&<Ideas state={state} setState={setState}/>} {active==="Perfil"&&<Profile state={state} setState={setState}/>}</div>;
+function PriorityDots({ p }: { p: Priority }) {
+  const c =
+    p === 3 ? "#d76c5d" : p === 2 ? "#d7a64c" : p === 1 ? "#6a9c7e" : "#c6c8ca";
+  return (
+    <div className="flex gap-1" title={`Prioridade ${p}`}>
+      {[1, 2, 3].map((x) => (
+        <span
+          key={x}
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ background: x <= p ? c : "#e3e0dc" }}
+        />
+      ))}
+    </div>
+  );
 }
 
-function TasksHub({tasks,toggle,edit}:{tasks:Task[];toggle:(id:string)=>void;edit:(t:Task)=>void}){
-  const [view,setView]=useState<"Lista"|"Kanban"|"Linha">("Lista"); const [filter,setFilter]=useState("Todas");
-  const lists=["Todas",...Array.from(new Set(tasks.map(t=>t.list)))]; const data=filter==="Todas"?tasks:tasks.filter(t=>t.list===filter);
-  return <div><SectionTitle title="Tarefas" subtitle="Listas, prioridades, tags e projetos."/><div className="segment mb-3">{(["Lista","Kanban","Linha"] as const).map(v=><button key={v} className={view===v?"active":""} onClick={()=>setView(v)}>{v}</button>)}</div><div className="mb-4 flex flex-wrap gap-2">{lists.map(l=><button key={l} onClick={()=>setFilter(l)} className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${filter===l?"bg-[#24364b] text-white":"border border-[#ddd7cf] bg-white"}`}>{l}</button>)}</div>{view==="Lista"?<div className="space-y-2">{data.sort((a,b)=>Number(a.done)-Number(b.done)||b.priority-a.priority).map(t=><TaskRow key={t.id} task={t} toggle={toggle} edit={edit}/>)}</div>:view==="Kanban"?<Kanban tasks={data} edit={edit}/>:<Timeline tasks={data} edit={edit}/>}</div>;
+function CategoryChip({ c, defs }: { c: string; defs: CategoryDef[] }) {
+  return (
+    <span
+      className="chip"
+      style={{ background: catBg(defs, c), color: catColor(defs, c) }}
+    >
+      {c}
+    </span>
+  );
 }
-function Kanban({tasks,edit}:{tasks:Task[];edit:(t:Task)=>void}){ const cols:[string,(t:Task)=>boolean][]=[["Hoje",t=>t.date===iso()&&!t.done],["Próximas",t=>t.date>iso()&&!t.done],["Concluídas",t=>t.done]]; return <div className="grid grid-cols-1 gap-3">{cols.map(([name,fn])=><section key={name} className="soft-card p-3"><div className="mb-2 text-xs font-bold">{name}</div><div className="space-y-2">{tasks.filter(fn).map(t=><button key={t.id} onClick={()=>edit(t)} className="block w-full rounded-xl bg-white p-3 text-left"><div className="text-sm font-semibold">{t.title}</div><div className="mt-1 text-[10px] text-[#8b939b]">{t.category} · {fmtShort(t.date)}</div></button>)}</div></section>)}</div> }
-function Timeline({tasks,edit}:{tasks:Task[];edit:(t:Task)=>void}){ const days=Array.from({length:7},(_,i)=>offsetISO(i)); return <div className="space-y-3">{days.map(d=><section key={d}><div className="mb-1 text-[10px] font-bold uppercase text-[#8b939b]">{fmtShort(d)}</div><div className="relative min-h-12 rounded-xl bg-[#f2eee8] p-2">{tasks.filter(t=>t.date===d).map(t=><button key={t.id} onClick={()=>edit(t)} className="mb-1 flex w-full items-center gap-2 rounded-lg bg-white px-3 py-2 text-left text-xs"><span className="h-2.5 w-2.5 rounded-full" style={{background:COLORS[t.category]}}/><span className="flex-1 font-semibold">{t.title}</span><span className="text-[#8c949c]">{t.minutes}m</span></button>)}</div></section>)}</div> }
 
-function Eisenhower({tasks,edit}:{tasks:Task[];edit:(t:Task)=>void}){ const open=tasks.filter(t=>!t.done); const boxes=[{title:"Fazer agora",sub:"Urgente + importante",bg:"#f6ded6",fn:(t:Task)=>t.priority===3&&t.date<=iso()},{title:"Agendar",sub:"Importante",bg:"#e8eef8",fn:(t:Task)=>t.priority>=2&&t.date>iso()},{title:"Resolver rápido",sub:"Urgente",bg:"#f8edcf",fn:(t:Task)=>t.priority===1&&t.date<=iso()},{title:"Talvez depois",sub:"Baixa pressão",bg:"#e3efe8",fn:(t:Task)=>t.priority<=1&&t.date>iso()}]; return <div><SectionTitle title="Matriz" subtitle="Prioridade sem transformar tudo em incêndio."/><div className="grid grid-cols-2 gap-2">{boxes.map(b=><section key={b.title} className="min-h-40 rounded-[20px] p-3" style={{background:b.bg}}><div className="text-xs font-bold">{b.title}</div><div className="mt-1 text-[9px] text-[#7e8790]">{b.sub}</div><div className="mt-3 space-y-2">{open.filter(b.fn).slice(0,4).map(t=><button key={t.id} onClick={()=>edit(t)} className="w-full rounded-xl bg-white/80 p-2 text-left text-[11px] font-semibold">{t.title}</button>)}</div></section>)}</div></div> }
+function CalendarView({
+  state,
+  toggleTask,
+  edit,
+}: {
+  state: AppState;
+  toggleTask: (id: string) => void;
+  edit: (t: Task) => void;
+}) {
+  const [mode, setMode] = useState<"Mês" | "Semana" | "Agenda">("Mês");
+  const [cursor, setCursor] = useState(new Date());
 
-function FocusHub({tasks,startFocus}:{tasks:Task[];startFocus:(t:Task)=>void}){ const open=tasks.filter(t=>!t.done).sort((a,b)=>b.priority-a.priority); return <div><SectionTitle title="Foco" subtitle="Pomodoro ou duração real da tarefa."/><div className="soft-card mb-4 p-4 text-center"><div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">Pomodoro rápido</div><div className="mt-2 text-4xl font-semibold">25:00</div><p className="mt-2 text-xs text-[#89919a]">Escolha uma tarefa abaixo para iniciar.</p></div><div className="space-y-2">{open.slice(0,8).map(t=><button key={t.id} onClick={()=>startFocus({...t,minutes:25})} className="card flex w-full items-center gap-3 p-3 text-left"><span className="grid h-9 w-9 place-items-center rounded-xl text-white" style={{background:COLORS[t.category]}}>▶</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{t.title}</span><span className="text-[10px] text-[#8b939b]">{t.category} · 25 min</span></span></button>)}</div></div> }
+  return (
+    <div>
+      <SectionTitle title="Calendário" subtitle="Veja o tempo antes de lotar o dia." />
 
-function Countdowns({state,setState}:{state:AppState;setState:any}){ const [title,setTitle]=useState(""); const [date,setDate]=useState(offsetISO(7)); return <div><SectionTitle title="Contagens" subtitle="Datas importantes sem ficar contando no calendário."/><div className="grid grid-cols-2 gap-2">{state.countdowns.map(c=>{const days=Math.ceil((new Date(`${c.date}T12:00:00`).getTime()-new Date(`${iso()}T12:00:00`).getTime())/86400000); return <section key={c.id} className="card p-4"><CategoryChip c={c.category}/><div className="mt-3 text-3xl font-semibold">{Math.max(days,0)}</div><div className="text-[10px] uppercase text-[#8c949c]">dias</div><div className="mt-2 text-sm font-semibold">{c.title}</div><button onClick={()=>setState((s:AppState)=>({...s,countdowns:s.countdowns.filter(x=>x.id!==c.id)}))} className="mt-3 text-[10px] text-[#a1685d]">remover</button></section>})}</div><section className="soft-card mt-4 p-4"><div className="text-sm font-semibold">Nova contagem</div><input className="mt-3 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm" placeholder="Ex.: viagem" value={title} onChange={e=>setTitle(e.target.value)}/><input type="date" className="mt-2 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm" value={date} onChange={e=>setDate(e.target.value)}/><button onClick={()=>{if(!title.trim())return;setState((s:AppState)=>({...s,countdowns:[...s.countdowns,{id:uid(),title:title.trim(),date,category:"Pessoal"}]}));setTitle("");}} className="mt-3 w-full rounded-xl bg-[#24364b] py-2.5 text-xs font-bold text-white">Adicionar</button></section></div> }
+      <div className="segment mb-4">
+        {(["Mês", "Semana", "Agenda"] as const).map((m) => (
+          <button
+            key={m}
+            className={mode === m ? "active" : ""}
+            onClick={() => setMode(m)}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
 
-function Ideas({state,setState}:{state:AppState;setState:any}){ return <div><SectionTitle title="Ideias" subtitle="Aqui nada vence. Ideia ainda não é obrigação."/><div className="space-y-3">{state.ideas.map(i=><section key={i.id} className="card p-4"><CategoryChip c={i.category}/><h3 className="mt-3 text-base font-semibold">{i.title}</h3><p className="mt-2 text-xs leading-5 text-[#7e8790]">{i.note}</p><button onClick={()=>setState((s:AppState)=>({...s,tasks:[...s.tasks,{id:uid(),title:i.title,notes:i.note,date:iso(),minutes:30,category:i.category,priority:1,done:false,tags:["ideia"],list:"Quero fazer",recurring:"none",steps:[]}]}))} className="mt-4 rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs font-bold">Planejar ideia</button></section>)}</div></div> }
+      <div className="mb-4 flex items-center justify-between">
+        <button
+          className="rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          onClick={() => setCursor((d) => shiftCursor(d, mode, -1))}
+        >
+          ‹
+        </button>
+        <strong className="text-sm capitalize">{calendarLabel(cursor, mode)}</strong>
+        <button
+          className="rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          onClick={() => setCursor((d) => shiftCursor(d, mode, 1))}
+        >
+          ›
+        </button>
+      </div>
 
-function Rhythm({state}:{state:AppState}){ const [period,setPeriod]=useState<"Semana"|"Mês"|"Ano">("Semana"); const {start,end,prevStart,prevEnd}=periodRange(period); const done=state.tasks.filter(t=>t.done&&between(t.date,start,end)); const prev=state.tasks.filter(t=>t.done&&between(t.date,prevStart,prevEnd)); const total=done.reduce((n,t)=>n+t.minutes,0); const byCat=categories.map(c=>({c,min:done.filter(t=>t.category===c).reduce((n,t)=>n+t.minutes,0),count:done.filter(t=>t.category===c).length})); const max=Math.max(1,...byCat.map(x=>x.min)); const prevTotal=prev.reduce((n,t)=>n+t.minutes,0); const delta=prevTotal?Math.round((total-prevTotal)/prevTotal*100):0; return <div><SectionTitle title="Seu ritmo" subtitle="Mais do que quantidade: onde sua atenção foi parar."/><div className="segment mb-4">{(["Semana","Mês","Ano"] as const).map(p=><button key={p} className={period===p?"active":""} onClick={()=>setPeriod(p)}>{p}</button>)}</div><section className="card mb-4 p-4"><div className="flex items-end justify-between"><div><div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">Tempo investido</div><div className="mt-1 text-3xl font-semibold">{Math.floor(total/60)}h {total%60}m</div></div><div className={`text-xs font-bold ${delta>=0?"text-[#5e9478]":"text-[#b46d5d]"}`}>{delta>=0?"+":""}{delta}% vs anterior</div></div></section><section className="card mb-4 p-4"><div className="mb-4 text-sm font-semibold">Pulso das áreas</div><div className="space-y-4">{byCat.map(x=><div key={x.c}><div className="mb-1 flex justify-between text-xs"><span className="font-semibold">{x.c}</span><span className="text-[#8b939b]">{x.min} min</span></div><div className="progressbar"><div style={{width:`${x.min/max*100}%`,background:COLORS[x.c]}}/></div></div>)}</div></section><PeriodInsight period={period} tasks={done}/></div> }
-function periodRange(p:"Semana"|"Mês"|"Ano"){ const now=new Date(); let start:Date,end:Date,prevStart:Date,prevEnd:Date; if(p==="Semana"){start=startOfWeek(now);end=new Date(start);end.setDate(start.getDate()+6);prevStart=new Date(start);prevStart.setDate(start.getDate()-7);prevEnd=new Date(start);prevEnd.setDate(start.getDate()-1);} else if(p==="Mês"){start=new Date(now.getFullYear(),now.getMonth(),1);end=new Date(now.getFullYear(),now.getMonth()+1,0);prevStart=new Date(now.getFullYear(),now.getMonth()-1,1);prevEnd=new Date(now.getFullYear(),now.getMonth(),0);} else {start=new Date(now.getFullYear(),0,1);end=new Date(now.getFullYear(),11,31);prevStart=new Date(now.getFullYear()-1,0,1);prevEnd=new Date(now.getFullYear()-1,11,31);} return {start,end,prevStart,prevEnd}; }
-function PeriodInsight({period,tasks}:{period:string;tasks:Task[]}){ const grouped=categories.map(c=>({c,min:tasks.filter(t=>t.category===c).reduce((n,t)=>n+t.minutes,0)})).sort((a,b)=>b.min-a.min); const high=grouped[0],low=[...grouped].reverse().find(x=>x.min>0)||grouped[grouped.length-1]; return <section className="soft-card p-4"><div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">Leitura do {period.toLowerCase()}</div>{tasks.length?<p className="mt-2 text-sm leading-5">Você colocou mais energia em <strong>{high.c}</strong>. {low&&low.c!==high.c?<>A área com menos presença foi <strong>{low.c}</strong>.</>:null} O objetivo não é deixar tudo igual, e sim perceber o padrão.</p>:<p className="mt-2 text-sm text-[#7e8790]">Ainda não há tarefas concluídas neste período.</p>}</section> }
-
-function Profile({state,setState}:{state:AppState;setState:any}){ const accents=["#24364b","#315f61","#5d6f91","#647b68","#785f79"]; return <div><SectionTitle title="Perfil" subtitle="Ajustes simples. O app deve se adaptar a você."/><section className="card p-4"><label className="text-xs font-bold">Seu nome</label><input value={state.userName} onChange={e=>setState((s:AppState)=>({...s,userName:e.target.value}))} className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"/><label className="mt-4 block text-xs font-bold">Nome do app</label><input value={state.appName} onChange={e=>setState((s:AppState)=>({...s,appName:e.target.value}))} className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"/><div className="mt-4 text-xs font-bold">Cor principal</div><div className="mt-2 flex gap-2">{accents.map(a=><button key={a} onClick={()=>setState((s:AppState)=>({...s,accent:a}))} className={`h-9 w-9 rounded-full ${state.accent===a?"ring-2 ring-offset-2 ring-[#24364b]":""}`} style={{background:a}}/>)}</div></section><section className="soft-card mt-4 p-4"><div className="text-sm font-semibold">Sobre seus dados</div><p className="mt-2 text-xs leading-5 text-[#7e8790]">Nesta versão, tudo fica salvo apenas neste navegador. Quando conectarmos ao Supabase, passa a sincronizar entre dispositivos.</p><button onClick={()=>{localStorage.removeItem("meu-ritmo-v2.3");location.reload();}} className="mt-4 text-xs font-bold text-[#a1685d]">Limpar todos os dados</button></section></div> }
-
-function TaskComposer({task,close,save,remove}:{task?:Task;close:()=>void;save:(t:Task)=>void;remove?:()=>void}){
-  const [title,setTitle]=useState(task?.title||""); const [notes,setNotes]=useState(task?.notes||""); const [date,setDate]=useState(task?.date||iso()); const [start,setStart]=useState(task?.start||""); const [minutes,setMinutes]=useState(task?.minutes||30); const [category,setCategory]=useState<Category>(task?.category||"Profissional"); const [priority,setPriority]=useState<Priority>(task?.priority||1); const [list,setList]=useState(task?.list||"Inbox"); const [tags,setTags]=useState(task?.tags.join(", ")||""); const [recurring,setRecurring]=useState<Task["recurring"]>(task?.recurring||"none"); const [steps,setSteps]=useState(task?.steps||[]); const [step,setStep]=useState("");
-  const submit=()=>{ if(!title.trim())return; save({id:task?.id||uid(),title:title.trim(),notes,date,start:start||undefined,minutes:Math.max(1,minutes),category,priority,done:task?.done||false,tags:tags.split(",").map(x=>x.trim()).filter(Boolean),list:list||"Inbox",project:task?.project,recurring,reminder:task?.reminder,steps}); };
-  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="sheet"><div className="mb-4 flex items-center justify-between"><strong>{task?"Editar tarefa":"Nova tarefa"}</strong><button onClick={close} className="text-xl">×</button></div><input autoFocus value={title} onChange={e=>setTitle(e.target.value)} placeholder="O que precisa ser feito?" className="w-full rounded-2xl border border-[#ddd7cf] px-4 py-3 text-base font-semibold"/><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Notas" className="mt-2 min-h-20 w-full rounded-2xl border border-[#ddd7cf] px-4 py-3 text-sm"/><div className="mt-3 grid grid-cols-2 gap-2"><Field label="Data"><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-full bg-transparent text-sm"/></Field><Field label="Horário"><input type="time" value={start} onChange={e=>setStart(e.target.value)} className="w-full bg-transparent text-sm"/></Field><Field label="Duração"><input type="number" value={minutes} onChange={e=>setMinutes(Number(e.target.value))} className="w-full bg-transparent text-sm"/></Field><Field label="Lista"><input value={list} onChange={e=>setList(e.target.value)} className="w-full bg-transparent text-sm"/></Field></div><div className="mt-3"><div className="mb-2 text-xs font-bold">Categoria</div><div className="flex flex-wrap gap-2">{categories.map(c=><button key={c} onClick={()=>setCategory(c)} className={`chip ${category===c?"ring-2 ring-[#24364b]/40":""}`} style={{background:BG[c],color:COLORS[c]}}>{c}</button>)}</div></div><div className="mt-3 grid grid-cols-2 gap-2"><Field label="Prioridade"><select value={priority} onChange={e=>setPriority(Number(e.target.value) as Priority)} className="w-full bg-transparent text-sm"><option value={0}>Nenhuma</option><option value={1}>Baixa</option><option value={2}>Média</option><option value={3}>Alta</option></select></Field><Field label="Repetir"><select value={recurring} onChange={e=>setRecurring(e.target.value as Task["recurring"])} className="w-full bg-transparent text-sm"><option value="none">Não repetir</option><option value="daily">Diariamente</option><option value="weekly">Semanalmente</option><option value="monthly">Mensalmente</option></select></Field></div><Field label="Tags"><input value={tags} onChange={e=>setTags(e.target.value)} placeholder="trabalho, rápida" className="w-full bg-transparent text-sm"/></Field><div className="mt-3"><div className="mb-2 text-xs font-bold">Checklist</div>{steps.map(s=><div key={s.id} className="mb-1 flex items-center gap-2 rounded-xl bg-[#f6f2ec] px-3 py-2 text-xs"><input type="checkbox" checked={s.done} onChange={()=>setSteps(x=>x.map(y=>y.id===s.id?{...y,done:!y.done}:y))}/><span className="flex-1">{s.text}</span><button onClick={()=>setSteps(x=>x.filter(y=>y.id!==s.id))}>×</button></div>)}<div className="flex gap-2"><input value={step} onChange={e=>setStep(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&step.trim()){e.preventDefault();setSteps(x=>[...x,{id:uid(),text:step.trim(),done:false}]);setStep("")}}} placeholder="Adicionar etapa" className="flex-1 rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs"/><button onClick={()=>{if(step.trim()){setSteps(x=>[...x,{id:uid(),text:step.trim(),done:false}]);setStep("")}}} className="rounded-xl border border-[#ddd7cf] px-3 text-xs font-bold">+</button></div></div><div className="mt-5 flex gap-2">{remove&&<button onClick={remove} className="rounded-xl border border-[#e8cfc8] px-4 py-3 text-xs font-bold text-[#a1685d]">Excluir</button>}<button onClick={submit} className="flex-1 rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white">Salvar tarefa</button></div></div></div>;
+      {mode === "Mês" ? (
+        <MonthGrid state={state} cursor={cursor} edit={edit} />
+      ) : mode === "Semana" ? (
+        <WeekGrid state={state} cursor={cursor} edit={edit} />
+      ) : (
+        <Agenda
+          state={state}
+          cursor={cursor}
+          toggle={toggleTask}
+          edit={edit}
+        />
+      )}
+    </div>
+  );
 }
-function Field({label,children}:{label:string;children:React.ReactNode}){return <label className="mt-2 block rounded-xl border border-[#ddd7cf] bg-white px-3 py-2"><span className="mb-1 block text-[9px] font-bold uppercase tracking-[.12em] text-[#8b939b]">{label}</span>{children}</label>}
 
-function HabitComposer({close,save}:{close:()=>void;save:(h:Habit)=>void}){ const [title,setTitle]=useState(""); const [category,setCategory]=useState<Category>("Saúde"); const [goal,setGoal]=useState(1); const [unit,setUnit]=useState("vez"); return <div className="modal-backdrop"><div className="sheet"><div className="flex justify-between"><strong>Novo hábito</strong><button onClick={close}>×</button></div><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ex.: Caminhar" className="mt-4 w-full rounded-xl border border-[#ddd7cf] px-3 py-3"/><div className="mt-3 flex flex-wrap gap-2">{categories.map(c=><button key={c} onClick={()=>setCategory(c)} className={`chip ${category===c?"ring-2 ring-[#24364b]/40":""}`} style={{background:BG[c],color:COLORS[c]}}>{c}</button>)}</div><div className="mt-3 grid grid-cols-2 gap-2"><Field label="Meta"><input type="number" value={goal} onChange={e=>setGoal(Number(e.target.value))} className="w-full bg-transparent"/></Field><Field label="Unidade"><input value={unit} onChange={e=>setUnit(e.target.value)} className="w-full bg-transparent"/></Field></div><button onClick={()=>{if(title.trim())save({id:uid(),title:title.trim(),category,goal:Math.max(1,goal),unit,days:[0,1,2,3,4,5,6],logs:{}})}} className="mt-5 w-full rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white">Criar hábito</button></div></div> }
+function shiftCursor(d: Date, mode: string, n: number) {
+  const x = new Date(d);
+  if (mode === "Mês") x.setMonth(x.getMonth() + n);
+  else x.setDate(x.getDate() + n * (mode === "Semana" ? 7 : 1));
+  return x;
+}
 
-function FocusSheet({task,secs,running,toggle,close,finish}:{task:Task;secs:number;running:boolean;toggle:()=>void;close:()=>void;finish:()=>void}){ const mm=String(Math.floor(secs/60)).padStart(2,"0"),ss=String(secs%60).padStart(2,"0"); return <div className="modal-backdrop"><div className="sheet text-center"><button onClick={close} className="float-right text-xl">×</button><CategoryChip c={task.category}/><h2 className="mt-4 text-xl font-semibold">{task.title}</h2><div className="my-8 text-6xl font-semibold tracking-tight">{mm}:{ss}</div><div className="flex gap-2"><button onClick={toggle} className="flex-1 rounded-xl border border-[#ddd7cf] py-3 text-sm font-bold">{running?"Pausar":"Continuar"}</button><button onClick={finish} className="flex-1 rounded-xl bg-[#24364b] py-3 text-sm font-bold text-white">Concluir</button></div></div></div> }
+function calendarLabel(d: Date, mode: string) {
+  return mode === "Mês"
+    ? new Intl.DateTimeFormat("pt-BR", {
+        month: "long",
+        year: "numeric",
+      }).format(d)
+    : mode === "Semana"
+    ? `Semana de ${fmtShort(iso(startOfWeek(d)))}`
+    : new Intl.DateTimeFormat("pt-BR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }).format(d);
+}
 
-function SectionTitle({title,subtitle,action}:{title:string;subtitle:string;action?:React.ReactNode}){return <div className="mb-5 flex items-start justify-between gap-3"><div><h1 className="text-[26px] font-semibold tracking-tight">{title}</h1><p className="mt-1 text-xs leading-5 text-[#7e8790]">{subtitle}</p></div>{action}</div>}
+function MonthGrid({
+  state,
+  cursor,
+  edit,
+}: {
+  state: AppState;
+  cursor: Date;
+  edit: (t: Task) => void;
+}) {
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(1 - ((first.getDay() + 6) % 7));
+  const days = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return d;
+  });
+
+  return (
+    <div>
+      <div className="mb-1 grid grid-cols-7 text-center text-[10px] font-bold uppercase text-[#9199a1]">
+        {["S", "T", "Q", "Q", "S", "S", "D"].map((x, i) => (
+          <div key={i}>{x}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {days.map((d) => {
+          const ds = iso(d);
+          const list = state.tasks.filter((t) => t.date === ds);
+          const dim = d.getMonth() !== cursor.getMonth();
+          return (
+            <div
+              key={ds}
+              className={`min-h-[70px] rounded-xl border p-1.5 ${
+                ds === iso()
+                  ? "border-[#24364b] bg-white"
+                  : "border-[#e4dfd8] bg-[#fffefa]"
+              } ${dim ? "opacity-35" : ""}`}
+            >
+              <div className="text-[10px] font-bold">{d.getDate()}</div>
+              <div className="mt-1 space-y-1">
+                {list.slice(0, 3).map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => edit(t)}
+                    className="block h-1.5 w-full rounded-full"
+                    style={{
+                      background: catColor(state.categories, t.category),
+                      opacity: t.done ? 0.35 : 1,
+                    }}
+                    title={t.title}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function WeekGrid({
+  state,
+  cursor,
+  edit,
+}: {
+  state: AppState;
+  cursor: Date;
+  edit: (t: Task) => void;
+}) {
+  const start = startOfWeek(cursor);
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return d;
+  });
+
+  return (
+    <div className="space-y-2">
+      {days.map((d) => {
+        const ds = iso(d);
+        const list = state.tasks
+          .filter((t) => t.date === ds)
+          .sort((a, b) => (a.start || "99").localeCompare(b.start || "99"));
+        return (
+          <section key={ds} className="card p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <strong className="text-sm capitalize">
+                {new Intl.DateTimeFormat("pt-BR", {
+                  weekday: "short",
+                  day: "2-digit",
+                }).format(d)}
+              </strong>
+              <span className="text-[10px] text-[#8c949c]">
+                {list.reduce((n, t) => n + t.minutes, 0)} min
+              </span>
+            </div>
+
+            {list.length ? (
+              list.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => edit(t)}
+                  className="mb-1 flex w-full items-center gap-2 rounded-xl bg-[#f8f4ee] p-2 text-left"
+                >
+                  <span
+                    className="h-7 w-1 rounded-full"
+                    style={{ background: catColor(state.categories, t.category) }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-semibold">{t.title}</div>
+                    <div className="text-[10px] text-[#8c949c]">
+                      {t.start || "Sem horário"}
+                      {t.minutes > 0 ? ` · ${durationLabel(t.minutes)}` : ""}
+                    </div>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <div className="py-2 text-xs text-[#a0a6ac]">Livre</div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function Agenda({
+  state,
+  cursor,
+  toggle,
+  edit,
+}: {
+  state: AppState;
+  cursor: Date;
+  toggle: (id: string) => void;
+  edit: (t: Task) => void;
+}) {
+  const days = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(cursor);
+    d.setDate(cursor.getDate() + i);
+    return d;
+  });
+
+  return (
+    <div className="space-y-4">
+      {days.map((d) => {
+        const ds = iso(d);
+        const list = state.tasks.filter((t) => t.date === ds);
+        if (!list.length) return null;
+        return (
+          <div key={ds}>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-[.14em] text-[#8c949c]">
+              {new Intl.DateTimeFormat("pt-BR", {
+                weekday: "long",
+                day: "numeric",
+                month: "short",
+              }).format(d)}
+            </div>
+            <div className="space-y-2">
+              {list.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  defs={state.categories}
+                  toggle={toggle}
+                  edit={edit}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HabitsView({
+  state,
+  setState,
+}: {
+  state: AppState;
+  setState: React.Dispatch<React.SetStateAction<AppState>>;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editHabit, setEditHabit] = useState<Habit | null>(null);
+  const today = iso();
+
+  const log = (h: Habit, delta: number) =>
+    setState((s) => ({
+      ...s,
+      habits: s.habits.map((x) =>
+        x.id === h.id
+          ? {
+              ...x,
+              logs: {
+                ...x.logs,
+                [today]: Math.max(0, (x.logs[today] || 0) + delta),
+              },
+            }
+          : x
+      ),
+    }));
+
+  const visible = state.habits.filter((h) => !h.archived);
+
+  return (
+    <div>
+      <SectionTitle
+        title="Hábitos"
+        subtitle="Consistência sem sequência punitiva."
+        action={
+          <button
+            onClick={() => setShowAdd(true)}
+            className="rounded-xl bg-[#24364b] px-3 py-2 text-xs font-bold text-white"
+          >
+            + hábito
+          </button>
+        }
+      />
+
+      <div className="space-y-3">
+        {visible.map((h) => {
+          const val = h.logs[today] || 0;
+          const pct = Math.min(100, (val / Math.max(h.goal, 1)) * 100);
+          return (
+            <section key={h.id} className="card p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <CategoryChip defs={state.categories} c={h.category} />
+                  <button
+                    onClick={() => setEditHabit(h)}
+                    className="mt-3 block text-left"
+                  >
+                    <h3 className="text-base font-semibold">{h.title}</h3>
+                    <p className="mt-1 text-xs text-[#87909a]">
+                      {habitFrequencyLabel(h)} · Meta: {h.goal} {h.unit}
+                    </p>
+                    {(h.time || h.minutes) && (
+                      <p className="mt-1 text-[11px] text-[#87909a]">
+                        {h.time ? `${h.time}` : ""}
+                        {h.time && h.minutes ? " · " : ""}
+                        {h.minutes ? durationLabel(h.minutes) : ""}
+                      </p>
+                    )}
+                  </button>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-semibold">{val}</div>
+                  <div className="text-[10px] text-[#87909a]">{h.unit}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 progressbar">
+                <div
+                  style={{
+                    width: `${pct}%`,
+                    background: catColor(state.categories, h.category),
+                  }}
+                />
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => log(h, -1)}
+                  className="flex-1 rounded-xl border border-[#ddd7cf] py-2 text-sm"
+                >
+                  −
+                </button>
+                <button
+                  onClick={() => log(h, 1)}
+                  className="flex-1 rounded-xl bg-[#24364b] py-2 text-sm font-bold text-white"
+                >
+                  + registrar
+                </button>
+              </div>
+
+              <MiniHabitHistory h={h} defs={state.categories} />
+            </section>
+          );
+        })}
+      </div>
+
+      {!visible.length && (
+        <section className="soft-card p-4 text-center">
+          <div className="text-sm font-semibold">Nenhum hábito ainda</div>
+          <p className="mt-1 text-xs text-[#7e8790]">
+            Crie algo que faça sentido para a sua rotina, mesmo que aconteça só uma vez por semana.
+          </p>
+        </section>
+      )}
+
+      {showAdd && (
+        <HabitComposer
+          state={state}
+          close={() => setShowAdd(false)}
+          save={(h) => {
+            setState((s) => ({ ...s, habits: [...s.habits, h] }));
+            setShowAdd(false);
+          }}
+        />
+      )}
+
+      {editHabit && (
+        <HabitComposer
+          state={state}
+          habit={editHabit}
+          close={() => setEditHabit(null)}
+          save={(h) => {
+            setState((s) => ({
+              ...s,
+              habits: s.habits.map((x) => (x.id === h.id ? h : x)),
+            }));
+            setEditHabit(null);
+          }}
+          remove={() => {
+            setState((s) => ({
+              ...s,
+              habits: s.habits.filter((x) => x.id !== editHabit.id),
+            }));
+            setEditHabit(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function habitFrequencyLabel(h: Habit) {
+  if (h.frequency === "daily") return "Diariamente";
+  if (h.frequency === "monthly") return "Mensal";
+  if (h.frequency === "weekly" || h.frequency === "custom") {
+    const names = WEEKDAYS.filter((d) => h.days.includes(d.n)).map((d) => d.label);
+    return names.length ? names.join(", ") : "Dias personalizados";
+  }
+  return "Personalizado";
+}
+
+function MiniHabitHistory({
+  h,
+  defs,
+}: {
+  h: Habit;
+  defs: CategoryDef[];
+}) {
+  const days = Array.from({ length: 7 }, (_, i) => offsetISO(i - 6));
+  return (
+    <div className="mt-4 flex justify-between">
+      {days.map((d) => {
+        const done = (h.logs[d] || 0) >= h.goal;
+        return (
+          <div key={d} className="text-center">
+            <div
+              className={`mx-auto h-5 w-5 rounded-full ${
+                done ? "" : "border border-[#ddd7cf]"
+              }`}
+              style={done ? { background: catColor(defs, h.category) } : {}}
+            />
+            <div className="mt-1 text-[9px] text-[#969da4]">
+              {new Intl.DateTimeFormat("pt-BR", { weekday: "narrow" }).format(
+                new Date(`${d}T12:00:00`)
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MoreHub({
+  active,
+  setActive,
+  state,
+  setState,
+  toggleTask,
+  edit,
+  startFocus,
+  convertIdea,
+}: {
+  active: MoreTab;
+  setActive: (m: MoreTab) => void;
+  state: AppState;
+  setState: React.Dispatch<React.SetStateAction<AppState>>;
+  toggleTask: (id: string) => void;
+  edit: (t: Task) => void;
+  startFocus: (t: Task) => void;
+  convertIdea: (i: Idea) => void;
+}) {
+  const items: [MoreTab, string][] = [
+    ["Ritmo", "◉"],
+    ["Tarefas", "☷"],
+    ["Eisenhower", "⊞"],
+    ["Foco", "◷"],
+    ["Contagens", "⌛"],
+    ["Ideias", "✦"],
+    ["Perfil", "○"],
+  ];
+
+  return (
+    <div>
+      <div className="mb-5 flex flex-wrap gap-2">
+        {items.map(([name, icon]) => (
+          <button
+            key={name}
+            onClick={() => setActive(name)}
+            className={`rounded-full px-3 py-2 text-xs font-bold transition ${
+              active === name
+                ? "bg-[#24364b] text-white shadow-sm"
+                : "border border-[#ddd7cf] bg-white text-[#68737e]"
+            }`}
+          >
+            {icon} {name}
+          </button>
+        ))}
+      </div>
+
+      {active === "Ritmo" && <Rhythm state={state} />}
+      {active === "Tarefas" && (
+        <TasksHub
+          state={state}
+          toggle={toggleTask}
+          edit={edit}
+        />
+      )}
+      {active === "Eisenhower" && (
+        <Eisenhower state={state} edit={edit} />
+      )}
+      {active === "Foco" && (
+        <FocusHub state={state} startFocus={startFocus} />
+      )}
+      {active === "Contagens" && (
+        <Countdowns state={state} setState={setState} />
+      )}
+      {active === "Ideias" && (
+        <Ideas
+          state={state}
+          setState={setState}
+          convertIdea={convertIdea}
+        />
+      )}
+      {active === "Perfil" && <Profile state={state} setState={setState} />}
+    </div>
+  );
+}
+
+function TasksHub({
+  state,
+  toggle,
+  edit,
+}: {
+  state: AppState;
+  toggle: (id: string) => void;
+  edit: (t: Task) => void;
+}) {
+  const [view, setView] = useState<"Lista" | "Kanban" | "Etapas">("Lista");
+  const [filter, setFilter] = useState("Todas");
+
+  const filters = ["Todas", ...state.categories.map((c) => c.name)];
+  const data =
+    filter === "Todas"
+      ? state.tasks
+      : state.tasks.filter((t) => t.category === filter);
+
+  return (
+    <div>
+      <SectionTitle
+        title="Tarefas"
+        subtitle="Organize por categoria, projeto, prioridade e etapas."
+      />
+
+      <div className="segment mb-3">
+        {(["Lista", "Kanban", "Etapas"] as const).map((v) => (
+          <button
+            key={v}
+            className={view === v ? "active" : ""}
+            onClick={() => setView(v)}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {filters.map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
+              filter === f
+                ? "bg-[#24364b] text-white"
+                : "border border-[#ddd7cf] bg-white"
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {view === "Lista" ? (
+        <div className="space-y-2">
+          {[...data]
+            .sort((a, b) => Number(a.done) - Number(b.done) || b.priority - a.priority)
+            .map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                defs={state.categories}
+                toggle={toggle}
+                edit={edit}
+              />
+            ))}
+        </div>
+      ) : view === "Kanban" ? (
+        <Kanban state={state} tasks={data} edit={edit} />
+      ) : (
+        <StepsView state={state} tasks={data} edit={edit} />
+      )}
+    </div>
+  );
+}
+
+function Kanban({
+  state,
+  tasks,
+  edit,
+}: {
+  state: AppState;
+  tasks: Task[];
+  edit: (t: Task) => void;
+}) {
+  const cols: [string, (t: Task) => boolean][] = [
+    ["Hoje", (t) => t.date === iso() && !t.done],
+    ["Próximas", (t) => t.date > iso() && !t.done],
+    ["Concluídas", (t) => t.done],
+  ];
+
+  return (
+    <div className="grid grid-cols-1 gap-3">
+      {cols.map(([name, fn]) => (
+        <section key={name} className="soft-card p-3">
+          <div className="mb-2 text-xs font-bold">{name}</div>
+          <div className="space-y-2">
+            {tasks.filter(fn).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => edit(t)}
+                className="block w-full rounded-xl bg-white p-3 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: catColor(state.categories, t.category) }}
+                  />
+                  <div className="text-sm font-semibold">{t.title}</div>
+                </div>
+                <div className="mt-1 text-[10px] text-[#8b939b]">
+                  {t.category} · {fmtShort(t.date)}
+                  {t.project ? ` · ${t.project}` : ""}
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function StepsView({
+  state,
+  tasks,
+  edit,
+}: {
+  state: AppState;
+  tasks: Task[];
+  edit: (t: Task) => void;
+}) {
+  const withSteps = tasks.filter((t) => t.steps.length > 0);
+
+  if (!withSteps.length) {
+    return (
+      <section className="soft-card p-4 text-center">
+        <div className="text-sm font-semibold">Nenhuma tarefa com etapas</div>
+        <p className="mt-1 text-xs text-[#7e8790]">
+          Ao criar ou editar uma tarefa, use “+ Adicionar etapa” quando ela tiver um processo.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {withSteps.map((t) => {
+        const done = t.steps.filter((s) => s.done).length;
+        const pct = Math.round((done / t.steps.length) * 100);
+        return (
+          <section key={t.id} className="card p-4">
+            <button onClick={() => edit(t)} className="block w-full text-left">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CategoryChip defs={state.categories} c={t.category} />
+                  <h3 className="mt-3 text-base font-semibold">{t.title}</h3>
+                  {t.project && (
+                    <p className="mt-1 text-xs text-[#87909a]">{t.project}</p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-semibold">{pct}%</div>
+                  <div className="text-[10px] text-[#87909a]">
+                    {done}/{t.steps.length}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 progressbar">
+                <div
+                  style={{
+                    width: `${pct}%`,
+                    background: catColor(state.categories, t.category),
+                  }}
+                />
+              </div>
+
+              <div className="mt-3 space-y-1">
+                {t.steps.slice(0, 4).map((s) => (
+                  <div
+                    key={s.id}
+                    className={`text-xs ${s.done ? "text-[#9aa1a8] line-through" : ""}`}
+                  >
+                    {s.done ? "✓" : "○"} {s.text}
+                  </div>
+                ))}
+              </div>
+            </button>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function Eisenhower({
+  state,
+  edit,
+}: {
+  state: AppState;
+  edit: (t: Task) => void;
+}) {
+  const open = state.tasks.filter((t) => !t.done);
+  const boxes = [
+    {
+      title: "Fazer agora",
+      sub: "Urgente + importante",
+      bg: "#f6ded6",
+      fn: (t: Task) => t.priority === 3 && t.date <= iso(),
+    },
+    {
+      title: "Agendar",
+      sub: "Importante",
+      bg: "#e8eef8",
+      fn: (t: Task) => t.priority >= 2 && t.date > iso(),
+    },
+    {
+      title: "Resolver rápido",
+      sub: "Urgente",
+      bg: "#f8edcf",
+      fn: (t: Task) => t.priority === 1 && t.date <= iso(),
+    },
+    {
+      title: "Talvez depois",
+      sub: "Baixa pressão",
+      bg: "#e3efe8",
+      fn: (t: Task) => t.priority <= 1 && t.date > iso(),
+    },
+  ];
+
+  return (
+    <div>
+      <SectionTitle
+        title="Matriz"
+        subtitle="Prioridade sem transformar tudo em incêndio."
+      />
+      <div className="grid grid-cols-2 gap-2">
+        {boxes.map((b) => (
+          <section
+            key={b.title}
+            className="min-h-40 rounded-[20px] p-3"
+            style={{ background: b.bg }}
+          >
+            <div className="text-xs font-bold">{b.title}</div>
+            <div className="mt-1 text-[9px] text-[#7e8790]">{b.sub}</div>
+            <div className="mt-3 space-y-2">
+              {open
+                .filter(b.fn)
+                .slice(0, 4)
+                .map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => edit(t)}
+                    className="w-full rounded-xl bg-white/80 p-2 text-left text-[11px] font-semibold"
+                  >
+                    {t.title}
+                  </button>
+                ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FocusHub({
+  state,
+  startFocus,
+}: {
+  state: AppState;
+  startFocus: (t: Task) => void;
+}) {
+  const open = state.tasks.filter((t) => !t.done).sort((a, b) => b.priority - a.priority);
+
+  return (
+    <div>
+      <SectionTitle title="Foco" subtitle="Pomodoro ou duração real da tarefa." />
+
+      <div className="soft-card mb-4 p-4 text-center">
+        <div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">
+          Pomodoro rápido
+        </div>
+        <div className="mt-2 text-4xl font-semibold">25:00</div>
+        <p className="mt-2 text-xs text-[#89919a]">
+          Escolha uma tarefa abaixo para iniciar.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {open.slice(0, 8).map((t) => (
+          <button
+            key={t.id}
+            onClick={() => startFocus({ ...t, minutes: 25 })}
+            className="card flex w-full items-center gap-3 p-3 text-left"
+          >
+            <span
+              className="grid h-9 w-9 place-items-center rounded-xl text-white"
+              style={{ background: catColor(state.categories, t.category) }}
+            >
+              ▶
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">{t.title}</span>
+              <span className="text-[10px] text-[#8b939b]">
+                {t.category} · 25 min
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Countdowns({
+  state,
+  setState,
+}: {
+  state: AppState;
+  setState: React.Dispatch<React.SetStateAction<AppState>>;
+}) {
+  const [title, setTitle] = useState("");
+  const [date, setDate] = useState(offsetISO(7));
+  const [category, setCategory] = useState(firstCategory(state));
+
+  return (
+    <div>
+      <SectionTitle
+        title="Contagens"
+        subtitle="Datas importantes sem ficar contando no calendário."
+      />
+
+      <div className="grid grid-cols-2 gap-2">
+        {state.countdowns.map((c) => {
+          const days = Math.ceil(
+            (new Date(`${c.date}T12:00:00`).getTime() -
+              new Date(`${iso()}T12:00:00`).getTime()) /
+              86400000
+          );
+          return (
+            <section key={c.id} className="card p-4">
+              <CategoryChip defs={state.categories} c={c.category} />
+              <div className="mt-3 text-3xl font-semibold">{Math.max(days, 0)}</div>
+              <div className="text-[10px] uppercase text-[#8c949c]">dias</div>
+              <div className="mt-2 text-sm font-semibold">{c.title}</div>
+              <button
+                onClick={() =>
+                  setState((s) => ({
+                    ...s,
+                    countdowns: s.countdowns.filter((x) => x.id !== c.id),
+                  }))
+                }
+                className="mt-3 text-[10px] text-[#a1685d]"
+              >
+                remover
+              </button>
+            </section>
+          );
+        })}
+      </div>
+
+      <section className="soft-card mt-4 p-4">
+        <div className="text-sm font-semibold">Nova contagem</div>
+        <input
+          className="mt-3 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          placeholder="Ex.: viagem"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <input
+          type="date"
+          className="mt-2 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+        <select
+          className="mt-2 w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        >
+          {state.categories.map((c) => (
+            <option key={c.id} value={c.name}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => {
+            if (!title.trim()) return;
+            setState((s) => ({
+              ...s,
+              countdowns: [
+                ...s.countdowns,
+                { id: uid(), title: title.trim(), date, category },
+              ],
+            }));
+            setTitle("");
+          }}
+          className="mt-3 w-full rounded-xl bg-[#24364b] py-2.5 text-xs font-bold text-white"
+        >
+          Adicionar
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function Ideas({
+  state,
+  setState,
+  convertIdea,
+}: {
+  state: AppState;
+  setState: React.Dispatch<React.SetStateAction<AppState>>;
+  convertIdea: (i: Idea) => void;
+}) {
+  const [editing, setEditing] = useState<Idea | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const removeIdea = (id: string) =>
+    setState((s) => ({ ...s, ideas: s.ideas.filter((i) => i.id !== id) }));
+
+  return (
+    <div>
+      <SectionTitle
+        title="Ideias"
+        subtitle="Aqui nada vence. Ideia ainda não é obrigação."
+        action={
+          <button
+            onClick={() => setCreating(true)}
+            className="rounded-xl bg-[#24364b] px-3 py-2 text-xs font-bold text-white"
+          >
+            + Nova ideia
+          </button>
+        }
+      />
+
+      {!state.ideas.length && (
+        <section className="soft-card mb-4 p-4 text-center">
+          <div className="text-sm font-semibold">Guarde uma ideia antes que ela fuja</div>
+          <p className="mt-1 text-xs text-[#7e8790]">
+            Ela pode ficar aqui sem data, sem pressão e sem virar tarefa ainda.
+          </p>
+          <button
+            onClick={() => setCreating(true)}
+            className="mt-3 rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs font-bold"
+          >
+            + Adicionar ideia
+          </button>
+        </section>
+      )}
+
+      <div className="space-y-3">
+        {state.ideas.map((i) => (
+          <section key={i.id} className="card p-4">
+            <CategoryChip defs={state.categories} c={i.category} />
+            <h3 className="mt-3 text-base font-semibold">{i.title}</h3>
+            {i.note && (
+              <p className="mt-2 text-xs leading-5 text-[#7e8790]">{i.note}</p>
+            )}
+            {i.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {i.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full bg-[#f6f2ec] px-2 py-1 text-[10px] text-[#7e8790]"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => convertIdea(i)}
+                className="rounded-xl bg-[#24364b] px-3 py-2 text-xs font-bold text-white"
+              >
+                Transformar em tarefa
+              </button>
+              <button
+                onClick={() => setEditing(i)}
+                className="rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs font-bold"
+              >
+                Editar
+              </button>
+            </div>
+
+            <button
+              onClick={() => removeIdea(i.id)}
+              className="mt-3 text-[10px] font-bold text-[#a1685d]"
+            >
+              Excluir ideia
+            </button>
+          </section>
+        ))}
+      </div>
+
+      {creating && (
+        <IdeaComposer
+          state={state}
+          close={() => setCreating(false)}
+          save={(idea) => {
+            setState((s) => ({ ...s, ideas: [...s.ideas, idea] }));
+            setCreating(false);
+          }}
+        />
+      )}
+
+      {editing && (
+        <IdeaComposer
+          state={state}
+          idea={editing}
+          close={() => setEditing(null)}
+          save={(idea) => {
+            setState((s) => ({
+              ...s,
+              ideas: s.ideas.map((x) => (x.id === idea.id ? idea : x)),
+            }));
+            setEditing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function Rhythm({ state }: { state: AppState }) {
+  const [period, setPeriod] = useState<"Semana" | "Mês" | "Ano">("Semana");
+  const { start, end, prevStart, prevEnd } = periodRange(period);
+
+  const done = state.tasks.filter((t) => t.done && between(t.date, start, end));
+  const prev = state.tasks.filter((t) => t.done && between(t.date, prevStart, prevEnd));
+  const total = done.reduce((n, t) => n + t.minutes, 0);
+
+  const byCat = state.categories.map((cat) => ({
+    c: cat.name,
+    min: done
+      .filter((t) => t.category === cat.name)
+      .reduce((n, t) => n + t.minutes, 0),
+  }));
+
+  const max = Math.max(1, ...byCat.map((x) => x.min));
+  const prevTotal = prev.reduce((n, t) => n + t.minutes, 0);
+  const delta = prevTotal ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0;
+
+  return (
+    <div>
+      <SectionTitle
+        title="Seu ritmo"
+        subtitle="Mais do que quantidade: onde sua atenção foi parar."
+      />
+
+      <div className="segment mb-4">
+        {(["Semana", "Mês", "Ano"] as const).map((p) => (
+          <button
+            key={p}
+            className={period === p ? "active" : ""}
+            onClick={() => setPeriod(p)}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      <section className="card mb-4 p-4">
+        <div className="flex items-end justify-between">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">
+              Tempo investido
+            </div>
+            <div className="mt-1 text-3xl font-semibold">
+              {Math.floor(total / 60)}h {total % 60}m
+            </div>
+          </div>
+          <div
+            className={`text-xs font-bold ${
+              delta >= 0 ? "text-[#5e9478]" : "text-[#b46d5d]"
+            }`}
+          >
+            {delta >= 0 ? "+" : ""}
+            {delta}% vs anterior
+          </div>
+        </div>
+      </section>
+
+      <section className="card mb-4 p-4">
+        <div className="mb-4 text-sm font-semibold">Pulso das áreas</div>
+        <div className="space-y-4">
+          {byCat.map((x) => (
+            <div key={x.c}>
+              <div className="mb-1 flex justify-between text-xs">
+                <span className="font-semibold">{x.c}</span>
+                <span className="text-[#8b939b]">{x.min} min</span>
+              </div>
+              <div className="progressbar">
+                <div
+                  style={{
+                    width: `${(x.min / max) * 100}%`,
+                    background: catColor(state.categories, x.c),
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <PeriodInsight period={period} state={state} tasks={done} />
+    </div>
+  );
+}
+
+function periodRange(p: "Semana" | "Mês" | "Ano") {
+  const now = new Date();
+  let start: Date, end: Date, prevStart: Date, prevEnd: Date;
+
+  if (p === "Semana") {
+    start = startOfWeek(now);
+    end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    prevStart = new Date(start);
+    prevStart.setDate(start.getDate() - 7);
+    prevEnd = new Date(start);
+    prevEnd.setDate(start.getDate() - 1);
+  } else if (p === "Mês") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    prevEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  } else {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = new Date(now.getFullYear(), 11, 31);
+    prevStart = new Date(now.getFullYear() - 1, 0, 1);
+    prevEnd = new Date(now.getFullYear() - 1, 11, 31);
+  }
+
+  return { start, end, prevStart, prevEnd };
+}
+
+function PeriodInsight({
+  period,
+  state,
+  tasks,
+}: {
+  period: string;
+  state: AppState;
+  tasks: Task[];
+}) {
+  const grouped = state.categories
+    .map((cat) => ({
+      c: cat.name,
+      min: tasks
+        .filter((t) => t.category === cat.name)
+        .reduce((n, t) => n + t.minutes, 0),
+    }))
+    .sort((a, b) => b.min - a.min);
+
+  const high = grouped[0];
+  const low =
+    [...grouped].reverse().find((x) => x.min > 0) || grouped[grouped.length - 1];
+
+  const label =
+    period === "Semana"
+      ? "Leitura da semana"
+      : period === "Mês"
+      ? "Leitura do mês"
+      : "Leitura do ano";
+
+  return (
+    <section className="soft-card p-4">
+      <div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">
+        {label}
+      </div>
+      {tasks.length ? (
+        <p className="mt-2 text-sm leading-5">
+          Você colocou mais energia em <strong>{high?.c}</strong>.
+          {low && high && low.c !== high.c ? (
+            <>
+              {" "}
+              A área com menos presença foi <strong>{low.c}</strong>.
+            </>
+          ) : null}{" "}
+          O objetivo não é deixar tudo igual, e sim perceber o padrão.
+        </p>
+      ) : (
+        <p className="mt-2 text-sm text-[#7e8790]">
+          Ainda não há tarefas concluídas neste período.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function Profile({
+  state,
+  setState,
+}: {
+  state: AppState;
+  setState: React.Dispatch<React.SetStateAction<AppState>>;
+}) {
+  const accents = ["#24364b", "#315f61", "#5d6f91", "#647b68", "#785f79"];
+  const [permission, setPermission] = useState<string>("default");
+  const [installable, setInstallable] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+
+  useEffect(() => {
+    if ("Notification" in window) setPermission(Notification.permission);
+    setInstallable(window.matchMedia("(display-mode: standalone)").matches);
+  }, []);
+
+  const enableNotifications = async () => {
+    try {
+      await registerPushSubscription();
+      setPermission("granted");
+      alert("Notificações ativadas com sucesso!");
+    } catch (error) {
+      console.error("Erro ao ativar push:", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Não foi possível ativar as notificações.";
+      alert(message);
+    }
+  };
+
+  const testNotification = async () => {
+    if (Notification.permission !== "granted") return enableNotifications();
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification("Meu Ritmo", {
+      body: "Notificações ativadas ✨ Este é um lembrete de teste.",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: "teste-meu-ritmo",
+    });
+  };
+
+  const testServerPush = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        alert("Usuário não encontrado.");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("push_subscriptions")
+        .select("*")
+        .eq("user_id", user.id)
+        .limit(1)
+        .single();
+
+      if (error || !data) {
+        console.error(error);
+        alert("Assinatura de push não encontrada.");
+        return;
+      }
+
+      fetch("/api/push", {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscription: {
+            endpoint: data.endpoint,
+            keys: {
+              p256dh: data.p256dh,
+              auth: data.auth,
+            },
+          },
+          title: "Meu Ritmo",
+          body: "Push com o app fechado funcionando ✨",
+          delaySeconds: 10,
+        }),
+      }).catch((error) => {
+        console.error("Erro ao solicitar push atrasado:", error);
+      });
+
+      alert("Push agendado para daqui a 10 segundos. Fecha a aba agora.");
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao testar push do servidor.");
+    }
+  };
+
+  const renameCategory = (id: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    setState((s) => {
+      const old = s.categories.find((c) => c.id === id);
+      if (!old || old.name === trimmed) return s;
+      if (s.categories.some((c) => c.id !== id && c.name.toLowerCase() === trimmed.toLowerCase())) {
+        alert("Já existe uma categoria com esse nome.");
+        return s;
+      }
+      return {
+        ...s,
+        categories: s.categories.map((c) => (c.id === id ? { ...c, name: trimmed } : c)),
+        tasks: s.tasks.map((t) => (t.category === old.name ? { ...t, category: trimmed } : t)),
+        habits: s.habits.map((h) => (h.category === old.name ? { ...h, category: trimmed } : h)),
+        ideas: s.ideas.map((i) => (i.category === old.name ? { ...i, category: trimmed } : i)),
+        countdowns: s.countdowns.map((c) => (c.category === old.name ? { ...c, category: trimmed } : c)),
+      };
+    });
+  };
+
+  const deleteCategory = (id: string) => {
+    if (state.categories.length <= 1) {
+      alert("Você precisa manter pelo menos uma categoria.");
+      return;
+    }
+    const cat = state.categories.find((c) => c.id === id);
+    if (!cat) return;
+    const replacement = state.categories.find((c) => c.id !== id)?.name || "Pessoal";
+    setState((s) => ({
+      ...s,
+      categories: s.categories.filter((c) => c.id !== id),
+      tasks: s.tasks.map((t) => (t.category === cat.name ? { ...t, category: replacement } : t)),
+      habits: s.habits.map((h) => (h.category === cat.name ? { ...h, category: replacement } : h)),
+      ideas: s.ideas.map((i) => (i.category === cat.name ? { ...i, category: replacement } : i)),
+      countdowns: s.countdowns.map((c) => (c.category === cat.name ? { ...c, category: replacement } : c)),
+    }));
+  };
+
+  const moveCategory = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= state.categories.length) return;
+    setState((s) => {
+      const categories = [...s.categories];
+      [categories[index], categories[target]] = [categories[target], categories[index]];
+      return { ...s, categories };
+    });
+  };
+
+  return (
+    <div>
+      <SectionTitle
+        title="Perfil"
+        subtitle="Ajustes simples. O app deve se adaptar a você."
+      />
+
+      <section className="card p-4">
+        <label className="text-xs font-bold">Seu nome</label>
+        <input
+          value={state.userName}
+          onChange={(e) =>
+            setState((s) => ({ ...s, userName: e.target.value }))
+          }
+          className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
+        />
+
+        <label className="mt-4 block text-xs font-bold">Nome do app</label>
+        <input
+          value={state.appName}
+          onChange={(e) =>
+            setState((s) => ({ ...s, appName: e.target.value }))
+          }
+          className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
+        />
+
+        <div className="mt-4 text-xs font-bold">Cor principal</div>
+        <div className="mt-2 flex gap-2">
+          {accents.map((a) => (
+            <button
+              key={a}
+              onClick={() => setState((s) => ({ ...s, accent: a }))}
+              className={`h-9 w-9 rounded-full ${
+                state.accent === a ? "ring-2 ring-offset-2 ring-[#24364b]" : ""
+              }`}
+              style={{ background: a }}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="card mt-4 p-4">
+        <div className="text-sm font-semibold">Categorias</div>
+        <p className="mt-1 text-xs leading-5 text-[#7e8790]">
+          Renomeie, troque a cor, crie, exclua ou reorganize.
+        </p>
+
+        <div className="mt-3 space-y-2">
+          {state.categories.map((c, index) => (
+            <div
+              key={c.id}
+              className="rounded-2xl border border-[#e2ddd5] bg-white p-3"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={c.color}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      categories: s.categories.map((x) =>
+                        x.id === c.id ? { ...x, color: e.target.value } : x
+                      ),
+                    }))
+                  }
+                  className="h-9 w-10 rounded-lg border-0 bg-transparent"
+                />
+                <input
+                  defaultValue={c.name}
+                  onBlur={(e) => renameCategory(c.id, e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
+                />
+                <button
+                  onClick={() => moveCategory(index, -1)}
+                  className="rounded-lg border border-[#ddd7cf] px-2 py-2 text-xs"
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={() => moveCategory(index, 1)}
+                  className="rounded-lg border border-[#ddd7cf] px-2 py-2 text-xs"
+                >
+                  ↓
+                </button>
+              </div>
+              <button
+                onClick={() => deleteCategory(c.id)}
+                className="mt-2 text-[10px] font-bold text-[#a1685d]"
+              >
+                Excluir categoria
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="Nova categoria"
+            className="min-w-0 flex-1 rounded-xl border border-[#ddd7cf] px-3 py-2 text-sm"
+          />
+          <button
+            onClick={() => {
+              const name = newCategory.trim();
+              if (!name) return;
+              if (
+                state.categories.some(
+                  (c) => c.name.toLowerCase() === name.toLowerCase()
+                )
+              ) {
+                alert("Já existe uma categoria com esse nome.");
+                return;
+              }
+              setState((s) => ({
+                ...s,
+                categories: [
+                  ...s.categories,
+                  { id: uid(), name, color: "#7d8b99" },
+                ],
+              }));
+              setNewCategory("");
+            }}
+            className="rounded-xl bg-[#24364b] px-4 py-2 text-xs font-bold text-white"
+          >
+            Criar
+          </button>
+        </div>
+      </section>
+
+      <section className="card mt-4 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">Notificações</div>
+            <p className="mt-1 text-xs leading-5 text-[#7e8790]">
+              Receba lembretes das tarefas com horário.
+            </p>
+          </div>
+          <span
+            className={`chip ${
+              permission === "granted"
+                ? "bg-[#e3efe8] text-[#4d7c65]"
+                : "bg-[#f6f2ec] text-[#7e8790]"
+            }`}
+          >
+            {permission === "granted" ? "Ativas" : "Desligadas"}
+          </span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            onClick={enableNotifications}
+            className="rounded-xl bg-[#24364b] px-3 py-2.5 text-xs font-bold text-white"
+          >
+            {permission === "granted" ? "Reautorizar" : "Ativar"}
+          </button>
+          <button
+            onClick={testNotification}
+            className="rounded-xl border border-[#ddd7cf] px-3 py-2.5 text-xs font-bold"
+          >
+            Testar
+          </button>
+        </div>
+
+        <button
+          onClick={testServerPush}
+          className="mt-2 w-full rounded-xl border border-[#ddd7cf] px-3 py-2.5 text-xs font-bold"
+        >
+          Testar push do servidor
+        </button>
+
+        <p className="mt-3 text-[10px] leading-4 text-[#8b939b]">
+          O push com o app totalmente fechado ainda está em teste.
+        </p>
+      </section>
+
+      <section className="soft-card mt-4 p-4">
+        <div className="text-sm font-semibold">Instalação</div>
+        <p className="mt-2 text-xs leading-5 text-[#7e8790]">
+          {installable
+            ? "Você já está usando como app instalado."
+            : "Android/Chrome: menu do navegador → Adicionar à tela inicial. iPhone/Safari: Compartilhar → Adicionar à Tela de Início."}
+        </p>
+      </section>
+
+      <section className="soft-card mt-4 p-4">
+        <div className="text-sm font-semibold">Sobre seus dados</div>
+        <p className="mt-2 text-xs leading-5 text-[#7e8790]">
+          Nesta versão, tarefas e preferências ainda ficam principalmente neste navegador.
+        </p>
+        <button
+          onClick={() => {
+            localStorage.removeItem("meu-ritmo-v2.3");
+            location.reload();
+          }}
+          className="mt-4 text-xs font-bold text-[#a1685d]"
+        >
+          Limpar todos os dados
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function TaskComposer({
+  state,
+  task,
+  initial,
+  close,
+  save,
+  remove,
+}: {
+  state: AppState;
+  task?: Task;
+  initial?: Partial<Task>;
+  close: () => void;
+  save: (t: Task) => void;
+  remove?: () => void;
+}) {
+  const base = task || initial;
+
+  const [title, setTitle] = useState(base?.title || "");
+  const [notes, setNotes] = useState(base?.notes || "");
+  const [date, setDate] = useState(base?.date || iso());
+  const [start, setStart] = useState(base?.start || "");
+  const [category, setCategory] = useState(base?.category || firstCategory(state));
+  const [priority, setPriority] = useState<Priority>(base?.priority ?? 1);
+  const [project, setProject] = useState(base?.project || "");
+  const [tags, setTags] = useState(base?.tags?.join(", ") || "");
+  const [recurring, setRecurring] = useState<Recurrence>(base?.recurring || "none");
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>(
+    base?.recurrenceDays || []
+  );
+  const [recurrenceEnd, setRecurrenceEnd] = useState(base?.recurrenceEnd || "");
+  const [reminder, setReminder] = useState(base?.reminder || "none");
+  const [steps, setSteps] = useState<Step[]>(base?.steps || []);
+  const [step, setStep] = useState("");
+  const [moreOptions, setMoreOptions] = useState(
+    Boolean(
+      project ||
+        tags ||
+        recurring !== "none" ||
+        recurrenceDays.length ||
+        recurrenceEnd ||
+        reminder !== "none" ||
+        steps.length ||
+        notes
+    )
+  );
+
+  const initialMinutes = base?.minutes || 0;
+  const initialDurationUnit = initialMinutes >= 60 && initialMinutes % 60 === 0 ? "h" : "min";
+  const [durationUnit, setDurationUnit] = useState<"min" | "h">(initialDurationUnit);
+  const [durationValue, setDurationValue] = useState<number | "">(
+    initialMinutes
+      ? initialDurationUnit === "h"
+        ? initialMinutes / 60
+        : initialMinutes
+      : ""
+  );
+
+  const minutes =
+    durationValue === "" || Number(durationValue) <= 0
+      ? 0
+      : durationUnit === "h"
+      ? Math.max(1, Math.round(Number(durationValue) * 60))
+      : Math.max(1, Math.round(Number(durationValue)));
+
+  const toggleDay = (n: number) =>
+    setRecurrenceDays((days) =>
+      days.includes(n) ? days.filter((d) => d !== n) : [...days, n].sort()
+    );
+
+  const submit = () => {
+    if (!title.trim()) return;
+
+    save({
+      id: task?.id || uid(),
+      title: title.trim(),
+      notes,
+      date,
+      start: start || undefined,
+      minutes,
+      category,
+      priority,
+      done: task?.done || false,
+      tags: tags
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+      project: project.trim() || undefined,
+      recurring,
+      recurrenceDays,
+      recurrenceEnd: recurrenceEnd || undefined,
+      reminder,
+      steps,
+    });
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <div className="sheet">
+        <div className="mb-4 flex items-center justify-between">
+          <strong>{task ? "Editar tarefa" : "Nova tarefa"}</strong>
+          <button onClick={close} className="text-xl">
+            ×
+          </button>
+        </div>
+
+        {initial && !task && (
+          <div className="mb-3 rounded-xl bg-[#f6f2ec] px-3 py-2 text-[11px] text-[#6f7882]">
+            Criando tarefa a partir de uma ideia
+          </div>
+        )}
+
+        <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
+          <span>Nome da tarefa</span>
+          <span className="text-[#6f7f92]">Obrigatório</span>
+        </div>
+
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="O que precisa ser feito?"
+          className="w-full rounded-2xl border border-[#ddd7cf] px-4 py-3 text-base font-semibold"
+        />
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Field label="Data" required>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full bg-transparent text-sm"
+            />
+          </Field>
+
+          <Field label="Horário">
+            <input
+              type="time"
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              className="w-full bg-transparent text-sm"
+            />
+          </Field>
+        </div>
+
+        <div className="mt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-bold">Duração</div>
+            <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#a1a7ad]">Opcional</div>
+          </div>
+          <div className="grid grid-cols-[1fr_120px] gap-2">
+            <input
+              type="number"
+              min="0.1"
+              step={durationUnit === "h" ? "0.5" : "5"}
+              value={durationValue}
+              onChange={(e) =>
+                setDurationValue(e.target.value === "" ? "" : Number(e.target.value))
+              }
+              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+            />
+            <select
+              value={durationUnit}
+              onChange={(e) => setDurationUnit(e.target.value as "min" | "h")}
+              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+            >
+              <option value="min">minutos</option>
+              <option value="h">horas</option>
+            </select>
+          </div>
+
+          <div className="mt-2 grid grid-cols-4 gap-1.5">
+            {[
+              { label: "15 min", m: 15 },
+              { label: "30 min", m: 30 },
+              { label: "1h", m: 60 },
+              { label: "2h", m: 120 },
+            ].map((x) => (
+              <button
+                key={x.m}
+                onClick={() => {
+                  if (x.m >= 60) {
+                    setDurationUnit("h");
+                    setDurationValue(x.m / 60);
+                  } else {
+                    setDurationUnit("min");
+                    setDurationValue(x.m);
+                  }
+                }}
+                className="rounded-xl border border-[#ddd7cf] bg-white px-2 py-2 text-[11px] font-bold"
+              >
+                {x.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-bold">Categoria</div>
+            <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#6f7f92]">Obrigatório</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {state.categories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCategory(c.name)}
+                className={`chip ${
+                  category === c.name ? "ring-2 ring-[#24364b]/40" : ""
+                }`}
+                style={{ background: `${c.color}20`, color: c.color }}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Field label="Prioridade">
+          <select
+            value={priority}
+            onChange={(e) => setPriority(Number(e.target.value) as Priority)}
+            className="w-full bg-transparent text-sm"
+          >
+            <option value={0}>Nenhuma</option>
+            <option value={1}>Baixa</option>
+            <option value={2}>Média</option>
+            <option value={3}>Alta</option>
+          </select>
+        </Field>
+
+        <button
+          onClick={() => setMoreOptions((v) => !v)}
+          className="mt-3 w-full rounded-xl border border-[#ddd7cf] bg-[#fffdf9] px-3 py-2.5 text-xs font-bold"
+        >
+          {moreOptions ? "− Menos opções" : "+ Mais opções"}
+        </button>
+
+        {moreOptions && (
+          <>
+            <Field label="Projeto">
+              <input
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+                placeholder="Ex.: Organização da viagem"
+                className="w-full bg-transparent text-sm"
+              />
+            </Field>
+
+            <Field label="Lembrete">
+              <select
+                value={reminder}
+                onChange={(e) => setReminder(e.target.value)}
+                className="w-full bg-transparent text-sm"
+              >
+                <option value="none">Sem lembrete</option>
+                <option value="0">Na hora</option>
+                <option value="5">5 min antes</option>
+                <option value="15">15 min antes</option>
+                <option value="30">30 min antes</option>
+                <option value="60">1h antes</option>
+              </select>
+            </Field>
+
+            <Field label="Repetir">
+              <select
+                value={recurring}
+                onChange={(e) => setRecurring(e.target.value as Recurrence)}
+                className="w-full bg-transparent text-sm"
+              >
+                <option value="none">Não repetir</option>
+                <option value="daily">Diariamente</option>
+                <option value="weekly">Semanalmente</option>
+                <option value="monthly">Mensalmente</option>
+                <option value="custom">Personalizado</option>
+              </select>
+            </Field>
+
+            {(recurring === "weekly" || recurring === "custom") && (
+              <div className="mt-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-xs font-bold">Dias</div>
+                  <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#6f7f92]">Obrigatório</div>
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {WEEKDAYS.map((d) => (
+                    <button
+                      key={d.n}
+                      onClick={() => toggleDay(d.n)}
+                      className={`rounded-xl py-2 text-[10px] font-bold ${
+                        recurrenceDays.includes(d.n)
+                          ? "bg-[#24364b] text-white"
+                          : "border border-[#ddd7cf] bg-white"
+                      }`}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {recurring !== "none" && (
+              <Field label="Repetir até (opcional)">
+                <input
+                  type="date"
+                  value={recurrenceEnd}
+                  onChange={(e) => setRecurrenceEnd(e.target.value)}
+                  className="w-full bg-transparent text-sm"
+                />
+              </Field>
+            )}
+
+            <Field label="Tags">
+              <input
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+                placeholder="trabalho, rápida"
+                className="w-full bg-transparent text-sm"
+              />
+            </Field>
+
+            <Field label="Notas">
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Observações, contexto, links..."
+                className="min-h-20 w-full resize-none bg-transparent text-sm"
+              />
+            </Field>
+
+            <div className="mt-3">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="text-xs font-bold">Etapas / Processo</div>
+                <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#a1a7ad]">Opcional</div>
+              </div>
+              <p className="mb-2 text-[10px] text-[#8b939b]">
+                Opcional. Use quando a tarefa tiver vários passos.
+              </p>
+
+              {steps.map((s) => (
+                <div
+                  key={s.id}
+                  className="mb-1 flex items-center gap-2 rounded-xl bg-[#f6f2ec] px-3 py-2 text-xs"
+                >
+                  <input
+                    type="checkbox"
+                    checked={s.done}
+                    onChange={() =>
+                      setSteps((x) =>
+                        x.map((y) =>
+                          y.id === s.id ? { ...y, done: !y.done } : y
+                        )
+                      )
+                    }
+                  />
+                  <span className="flex-1">{s.text}</span>
+                  <button
+                    onClick={() =>
+                      setSteps((x) => x.filter((y) => y.id !== s.id))
+                    }
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+
+              {!!steps.length && (
+                <div className="mb-2 text-[10px] text-[#8b939b]">
+                  {steps.filter((s) => s.done).length} de {steps.length} etapas concluídas
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  value={step}
+                  onChange={(e) => setStep(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && step.trim()) {
+                      e.preventDefault();
+                      setSteps((x) => [
+                        ...x,
+                        { id: uid(), text: step.trim(), done: false },
+                      ]);
+                      setStep("");
+                    }
+                  }}
+                  placeholder="Adicionar etapa"
+                  className="flex-1 rounded-xl border border-[#ddd7cf] px-3 py-2 text-xs"
+                />
+                <button
+                  onClick={() => {
+                    if (step.trim()) {
+                      setSteps((x) => [
+                        ...x,
+                        { id: uid(), text: step.trim(), done: false },
+                      ]);
+                      setStep("");
+                    }
+                  }}
+                  className="rounded-xl border border-[#ddd7cf] px-3 text-xs font-bold"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="mt-5 flex gap-2">
+          {remove && (
+            <button
+              onClick={remove}
+              className="rounded-xl border border-[#e8cfc8] px-4 py-3 text-xs font-bold text-[#a1685d]"
+            >
+              Excluir
+            </button>
+          )}
+          <button
+            onClick={submit}
+            className="flex-1 rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white"
+          >
+            Salvar tarefa
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HabitComposer({
+  state,
+  habit,
+  close,
+  save,
+  remove,
+}: {
+  state: AppState;
+  habit?: Habit;
+  close: () => void;
+  save: (h: Habit) => void;
+  remove?: () => void;
+}) {
+  const [title, setTitle] = useState(habit?.title || "");
+  const [category, setCategory] = useState(habit?.category || firstCategory(state));
+  const [frequency, setFrequency] = useState<HabitFrequency>(
+    habit?.frequency || "daily"
+  );
+  const [days, setDays] = useState<number[]>(
+    habit?.days || [0, 1, 2, 3, 4, 5, 6]
+  );
+  const [goal, setGoal] = useState(habit?.goal || 1);
+  const [unit, setUnit] = useState(habit?.unit || "vez");
+  const [time, setTime] = useState(habit?.time || "");
+  const [period, setPeriod] = useState<DayPeriod>(habit?.period || "Outro");
+  const [startDate, setStartDate] = useState(habit?.startDate || iso());
+  const [endDate, setEndDate] = useState(habit?.endDate || "");
+  const [reminder, setReminder] = useState(habit?.reminder || "none");
+  const [archived, setArchived] = useState(habit?.archived || false);
+
+  const initialMinutes = habit?.minutes || 30;
+  const initialDurationUnit = initialMinutes >= 60 && initialMinutes % 60 === 0 ? "h" : "min";
+  const [durationUnit, setDurationUnit] = useState<"min" | "h">(initialDurationUnit);
+  const [durationValue, setDurationValue] = useState(
+    initialDurationUnit === "h" ? initialMinutes / 60 : initialMinutes
+  );
+
+  const minutes =
+    durationUnit === "h"
+      ? Math.max(1, Math.round(Number(durationValue) * 60))
+      : Math.max(1, Math.round(Number(durationValue)));
+
+  const toggleDay = (n: number) =>
+    setDays((x) =>
+      x.includes(n) ? x.filter((d) => d !== n) : [...x, n].sort()
+    );
+
+  const submit = () => {
+    if (!title.trim()) return;
+    save({
+      id: habit?.id || uid(),
+      title: title.trim(),
+      category,
+      frequency,
+      days:
+        frequency === "daily"
+          ? [0, 1, 2, 3, 4, 5, 6]
+          : days,
+      goal: Math.max(1, goal),
+      unit: unit.trim() || "vez",
+      logs: habit?.logs || {},
+      time: time || undefined,
+      minutes,
+      period,
+      startDate,
+      endDate: endDate || undefined,
+      reminder,
+      archived,
+    });
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div className="sheet">
+        <div className="mb-4 flex justify-between">
+          <strong>{habit ? "Editar hábito" : "Novo hábito"}</strong>
+          <button onClick={close}>×</button>
+        </div>
+
+        <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
+          <span>Nome do hábito</span>
+          <span className="text-[#6f7f92]">Obrigatório</span>
+        </div>
+
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Ex.: Aula de teclado"
+          className="w-full rounded-xl border border-[#ddd7cf] px-3 py-3"
+        />
+
+        <div className="mt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-bold">Categoria</div>
+            <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#6f7f92]">Obrigatório</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {state.categories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCategory(c.name)}
+                className={`chip ${
+                  category === c.name ? "ring-2 ring-[#24364b]/40" : ""
+                }`}
+                style={{ background: `${c.color}20`, color: c.color }}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Field label="Frequência" required>
+          <select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value as HabitFrequency)}
+            className="w-full bg-transparent text-sm"
+          >
+            <option value="daily">Diariamente</option>
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensal</option>
+            <option value="custom">Personalizada</option>
+          </select>
+        </Field>
+
+        {(frequency === "weekly" || frequency === "custom") && (
+          <div className="mt-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-xs font-bold">Selecione os dias</div>
+              <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#6f7f92]">Obrigatório</div>
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {WEEKDAYS.map((d) => (
+                <button
+                  key={d.n}
+                  onClick={() => toggleDay(d.n)}
+                  className={`rounded-xl py-2 text-[10px] font-bold ${
+                    days.includes(d.n)
+                      ? "bg-[#24364b] text-white"
+                      : "border border-[#ddd7cf] bg-white"
+                  }`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Field label="Objetivo" required>
+            <input
+              type="number"
+              min="1"
+              value={goal}
+              onChange={(e) => setGoal(Number(e.target.value))}
+              className="w-full bg-transparent text-sm"
+            />
+          </Field>
+          <Field label="Unidade" required>
+            <input
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              placeholder="vez, copos, km"
+              className="w-full bg-transparent text-sm"
+            />
+          </Field>
+        </div>
+
+        <div className="mt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-bold">Duração</div>
+            <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#a1a7ad]">Opcional</div>
+          </div>
+          <div className="grid grid-cols-[1fr_120px] gap-2">
+            <input
+              type="number"
+              min="0.1"
+              step={durationUnit === "h" ? "0.5" : "5"}
+              value={durationValue}
+              onChange={(e) => setDurationValue(Number(e.target.value))}
+              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+            />
+            <select
+              value={durationUnit}
+              onChange={(e) => setDurationUnit(e.target.value as "min" | "h")}
+              className="w-full rounded-xl border border-[#ddd7cf] bg-white px-3 py-2 text-sm"
+            >
+              <option value="min">minutos</option>
+              <option value="h">horas</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Field label="Data de início" required>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full bg-transparent text-sm"
+            />
+          </Field>
+          <Field label="Data final">
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full bg-transparent text-sm"
+            />
+          </Field>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Field label="Período">
+            <select
+              value={period}
+              onChange={(e) => setPeriod(e.target.value as DayPeriod)}
+              className="w-full bg-transparent text-sm"
+            >
+              <option>Manhã</option>
+              <option>Tarde</option>
+              <option>Noite</option>
+              <option>Outro</option>
+            </select>
+          </Field>
+          <Field label="Horário">
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="w-full bg-transparent text-sm"
+            />
+          </Field>
+        </div>
+
+        <Field label="Lembrete">
+          <select
+            value={reminder}
+            onChange={(e) => setReminder(e.target.value)}
+            className="w-full bg-transparent text-sm"
+          >
+            <option value="none">Sem lembrete</option>
+            <option value="0">Na hora</option>
+            <option value="5">5 min antes</option>
+            <option value="15">15 min antes</option>
+            <option value="30">30 min antes</option>
+            <option value="60">1h antes</option>
+          </select>
+        </Field>
+
+        {habit && (
+          <label className="mt-3 flex items-center justify-between rounded-xl border border-[#ddd7cf] bg-white px-3 py-3 text-xs font-bold">
+            Hábito arquivado
+            <input
+              type="checkbox"
+              checked={archived}
+              onChange={(e) => setArchived(e.target.checked)}
+            />
+          </label>
+        )}
+
+        <div className="mt-5 flex gap-2">
+          {remove && (
+            <button
+              onClick={remove}
+              className="rounded-xl border border-[#e8cfc8] px-4 py-3 text-xs font-bold text-[#a1685d]"
+            >
+              Excluir
+            </button>
+          )}
+          <button
+            onClick={submit}
+            className="flex-1 rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white"
+          >
+            Salvar hábito
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IdeaComposer({
+  state,
+  idea,
+  close,
+  save,
+}: {
+  state: AppState;
+  idea?: Idea;
+  close: () => void;
+  save: (i: Idea) => void;
+}) {
+  const [title, setTitle] = useState(idea?.title || "");
+  const [note, setNote] = useState(idea?.note || "");
+  const [category, setCategory] = useState(idea?.category || firstCategory(state));
+  const [tags, setTags] = useState(idea?.tags?.join(", ") || "");
+
+  return (
+    <div className="modal-backdrop">
+      <div className="sheet">
+        <div className="flex justify-between">
+          <strong>{idea ? "Editar ideia" : "Nova ideia"}</strong>
+          <button onClick={close}>×</button>
+        </div>
+
+        <div className="mt-4 mb-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
+          <span>Título da ideia</span>
+          <span className="text-[#6f7f92]">Obrigatório</span>
+        </div>
+
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Qual é a ideia?"
+          className="w-full rounded-xl border border-[#ddd7cf] px-3 py-3"
+        />
+
+        <div className="mt-3 mb-2 flex items-center justify-between gap-2 text-[10px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
+          <span>Observação</span>
+          <span className="text-[#a1a7ad]">Opcional</span>
+        </div>
+
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Anotações livres..."
+          className="min-h-24 w-full rounded-xl border border-[#ddd7cf] px-3 py-3 text-sm"
+        />
+
+        <div className="mt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-bold">Categoria</div>
+            <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#6f7f92]">Obrigatório</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {state.categories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCategory(c.name)}
+                className={`chip ${
+                  category === c.name ? "ring-2 ring-[#24364b]/40" : ""
+                }`}
+                style={{ background: `${c.color}20`, color: c.color }}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Field label="Tags">
+          <input
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="produto, conteúdo"
+            className="w-full bg-transparent text-sm"
+          />
+        </Field>
+
+        <button
+          onClick={() => {
+            if (!title.trim()) return;
+            save({
+              id: idea?.id || uid(),
+              title: title.trim(),
+              note,
+              category,
+              tags: tags
+                .split(",")
+                .map((x) => x.trim())
+                .filter(Boolean),
+            });
+          }}
+          className="mt-5 w-full rounded-xl bg-[#24364b] py-3 text-xs font-bold text-white"
+        >
+          Salvar ideia
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  required = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <label className="mt-2 block rounded-xl border border-[#ddd7cf] bg-white px-3 py-2">
+      <span className="mb-1 flex items-center justify-between gap-2 text-[9px] font-bold uppercase tracking-[.12em] text-[#8b939b]">
+        <span>{label}</span>
+        <span className={required ? "text-[#6f7f92]" : "text-[#a1a7ad]"}>
+          {required ? "Obrigatório" : "Opcional"}
+        </span>
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function FocusSheet({
+  task,
+  state,
+  secs,
+  running,
+  toggle,
+  close,
+  finish,
+}: {
+  task: Task;
+  state: AppState;
+  secs: number;
+  running: boolean;
+  toggle: () => void;
+  close: () => void;
+  finish: () => void;
+}) {
+  const mm = String(Math.floor(secs / 60)).padStart(2, "0");
+  const ss = String(secs % 60).padStart(2, "0");
+
+  return (
+    <div className="modal-backdrop">
+      <div className="sheet text-center">
+        <button onClick={close} className="float-right text-xl">
+          ×
+        </button>
+        <CategoryChip defs={state.categories} c={task.category} />
+        <h2 className="mt-4 text-xl font-semibold">{task.title}</h2>
+        <div className="my-8 text-6xl font-semibold tracking-tight">
+          {mm}:{ss}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={toggle}
+            className="flex-1 rounded-xl border border-[#ddd7cf] py-3 text-sm font-bold"
+          >
+            {running ? "Pausar" : "Continuar"}
+          </button>
+          <button
+            onClick={finish}
+            className="flex-1 rounded-xl bg-[#24364b] py-3 text-sm font-bold text-white"
+          >
+            Concluir
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-5 flex items-start justify-between gap-3">
+      <div>
+        <h1 className="text-[26px] font-semibold tracking-tight">{title}</h1>
+        <p className="mt-1 text-xs leading-5 text-[#7e8790]">{subtitle}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
