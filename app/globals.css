@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+html { background: #ece7df; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% 2%, rgba(242,224,185,.55), transparent 24%),
+    radial-gradient(circle at 94% 9%, rgba(210,230,218,.58), transparent 28%),
+    #ece7df;
+  color: #24364b;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+button,input,textarea,select { font: inherit; }
+button { cursor: pointer; }
+::selection { background:#efc6b7; }
+.phone-shell { box-shadow:0 24px 70px rgba(34,49,67,.16),0 3px 14px rgba(34,49,67,.06); }
+.card { background:#fffefa; border:1px solid rgba(221,214,203,.62); border-radius:22px; box-shadow:0 8px 24px rgba(32,58,92,.045); }
+.soft-card { background:#f7f1e8; border:1px solid rgba(221,214,203,.45); border-radius:22px; }
+.nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 2px 3px; color:#85909c; font-size:9px; font-weight:600; }
+.nav-item.active { color:#24364b; }
+.nav-icon { font-size:18px; line-height:1; }
+.hide-scrollbar::-webkit-scrollbar { display:none; }
+.hide-scrollbar { scrollbar-width:none; }
+.segment { background:#f1ece5; padding:3px; border-radius:14px; display:flex; gap:3px; }
+.segment button { flex:1; border-radius:11px; padding:8px 10px; font-size:11px; font-weight:700; color:#7d8794; }
+.segment button.active { background:white; color:#24364b; box-shadow:0 2px 7px rgba(36,54,75,.08); }
+.progressbar { height:8px; overflow:hidden; border-radius:99px; background:#eee7df; }
+.progressbar > div { height:100%; border-radius:99px; transition:width .2s ease; }
+.modal-backdrop { position:fixed; inset:0; z-index:60; display:grid; place-items:end center; background:rgba(30,40,50,.32); backdrop-filter:blur(5px); }
+.sheet { width:min(100%,440px); max-height:92vh; overflow:auto; border-radius:30px 30px 0 0; background:#fffdf9; padding:20px; box-shadow:0 -16px 50px rgba(30,40,50,.16); }
+.chip { display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:5px 9px; font-size:10px; font-weight:700; }
+.fab { width:52px; height:52px; border-radius:50%; display:grid; place-items:center; border:5px solid #fffdf9; margin:-24px auto 0; background:#24364b; color:#fff; font-size:24px; box-shadow:0 8px 22px rgba(36,54,75,.22); }
+textarea { resize:vertical; }
+input[type="checkbox"] { accent-color:#24364b; }
+@media (max-width:480px){main{padding:0!important}.phone-shell{min-height:100vh!important;border-radius:0!important;border:0!important}}
