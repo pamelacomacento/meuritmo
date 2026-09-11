@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import CloudSync from "./cloud-sync";
 
 export const metadata: Metadata = {
   title: "Meu Ritmo",
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="pt-BR">
       <body>
+        <CloudSync />
         {children}
         <script src="/backup-tools.js" defer />
       </body>
