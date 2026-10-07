@@ -4,8 +4,11 @@ import { useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
 const STORAGE_KEY = "meu-ritmo-v2.3";
+
 const LOCAL_POLL_MS = 1000;
 const CLOUD_POLL_MS = 5000;
+const SESSION_RETRY_MS = 1000;
+const SESSION_RETRY_LIMIT = 15;
 
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -15,9 +18,11 @@ function stableValue(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.keys(value as Record<string, unknown>)
       .sort()
-      .reduce<Record<string, unknown>>((acc, key) => {
-        acc[key] = stableValue((value as Record<string, unknown>)[key]);
-        return acc;
+      .reduce<Record<string, unknown>>((result, key) => {
+        result[key] = stableValue(
+          (value as Record<string, unknown>)[key]
+        );
+        return result;
       }, {});
   }
 
@@ -43,160 +48,252 @@ export default function CloudSync() {
     let stopped = false;
     let localTimer: ReturnType<typeof setInterval> | null = null;
     let cloudTimer: ReturnType<typeof setInterval> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: (() => void) | null = null;
 
-    let userId = "";
-    let lastLocalCanonical = "";
-    let lastCloudUpdatedAt = "";
-    let uploading = false;
-    let checkingCloud = false;
+    let lastLocalValue =
+      typeof window !== "undefined"
+        ? localStorage.getItem(STORAGE_KEY)
+        : null;
 
-    const uploadLocalState = async (raw: string) => {
-      if (!userId || uploading || stopped) return;
+    let lastCloudValue: string | null = null;
 
-      const parsed = parseState(raw);
-      if (!parsed) return;
+    const stopTimers = () => {
+      if (localTimer) {
+        clearInterval(localTimer);
+        localTimer = null;
+      }
 
-      uploading = true;
+      if (cloudTimer) {
+        clearInterval(cloudTimer);
+        cloudTimer = null;
+      }
 
-      try {
-        const now = new Date().toISOString();
-
-        const { data, error } = await supabase
-          .from("app_state")
-          .upsert(
-            {
-              user_id: userId,
-              state: parsed,
-              updated_at: now,
-            },
-            { onConflict: "user_id" }
-          )
-          .select("updated_at")
-          .single();
-
-        if (!error && data?.updated_at) {
-          lastCloudUpdatedAt = data.updated_at;
-        }
-      } finally {
-        uploading = false;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
       }
     };
 
-    const checkLocalChanges = async () => {
-      if (stopped || !userId) return;
+    const uploadLocalState = async (userId: string) => {
+      if (stopped) return;
 
       const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = parseState(raw);
-      if (!raw || !parsed) return;
+      if (!raw) return;
 
-      const canonical = stableStringify(parsed);
+      const state = parseState(raw);
+      if (!state) return;
 
-      if (canonical === lastLocalCanonical) return;
+      const { error } = await supabase
+        .from("app_state")
+        .upsert(
+          {
+            user_id: userId,
+            data: state,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            onConflict: "user_id",
+          }
+        );
 
-      lastLocalCanonical = canonical;
-      await uploadLocalState(raw);
-    };
-
-    const checkCloudChanges = async () => {
-      if (stopped || !userId || checkingCloud || uploading) return;
-
-      checkingCloud = true;
-
-      try {
-        const { data, error } = await supabase
-          .from("app_state")
-          .select("state, updated_at")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (error || !data?.state || !data.updated_at) return;
-
-        if (data.updated_at === lastCloudUpdatedAt) return;
-
-        const cloudCanonical = stableStringify(data.state);
-        const currentRaw = localStorage.getItem(STORAGE_KEY);
-        const currentState = parseState(currentRaw);
-        const currentCanonical = currentState
-          ? stableStringify(currentState)
-          : "";
-
-        lastCloudUpdatedAt = data.updated_at;
-
-        if (cloudCanonical === currentCanonical) {
-          lastLocalCanonical = currentCanonical;
-          return;
-        }
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data.state));
-        lastLocalCanonical = cloudCanonical;
-
-        // O app atual lê o estado no carregamento.
-        // Recarregar garante que a alteração remota apareça sem mexer
-        // na lógica principal da tela.
-        window.location.reload();
-      } finally {
-        checkingCloud = false;
+      if (!error) {
+        lastLocalValue = raw;
       }
     };
 
-    const start = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    const checkLocalChanges = async (userId: string) => {
+      if (stopped) return;
 
-      if (
-        stopped ||
-        !session ||
-        session.user.is_anonymous
-      ) {
+      const raw = localStorage.getItem(STORAGE_KEY);
+
+      if (!raw || raw === lastLocalValue) {
         return;
       }
 
-      userId = session.user.id;
+      const state = parseState(raw);
+
+      if (!state) return;
+
+      const { error } = await supabase
+        .from("app_state")
+        .upsert(
+          {
+            user_id: userId,
+            data: state,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            onConflict: "user_id",
+          }
+        );
+
+      if (!error) {
+        lastLocalValue = raw;
+        lastCloudValue = stableStringify(state);
+      }
+    };
+
+    const checkCloudChanges = async (userId: string) => {
+      if (stopped) return;
+
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("data, updated_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (error || !data?.data) {
+        return;
+      }
+
+      const cloudValue = stableStringify(data.data);
+
+      if (cloudValue === lastCloudValue) {
+        return;
+      }
+
+      lastCloudValue = cloudValue;
 
       const localRaw = localStorage.getItem(STORAGE_KEY);
       const localState = parseState(localRaw);
 
-      if (localState) {
-        lastLocalCanonical = stableStringify(localState);
+      const localValue = localState
+        ? stableStringify(localState)
+        : null;
+
+      if (localValue === cloudValue) {
+        lastLocalValue = localRaw;
+        return;
       }
 
-      const { data, error } = await supabase
-        .from("app_state")
-        .select("state, updated_at")
-        .eq("user_id", userId)
-        .maybeSingle();
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(data.data)
+      );
+
+      lastLocalValue = JSON.stringify(data.data);
+
+      window.location.reload();
+    };
+
+    const start = async (attempt = 0) => {
+      if (stopped) return;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        if (attempt < SESSION_RETRY_LIMIT) {
+          retryTimer = setTimeout(() => {
+            start(attempt + 1);
+          }, SESSION_RETRY_MS);
+        }
+
+        return;
+      }
+
+      const user = session.user;
+
+      if (user.is_anonymous) {
+        return;
+      }
+
+      stopTimers();
+
+      await checkCloudChanges(user.id);
 
       if (stopped) return;
 
-      if (!error && data?.state) {
-        lastCloudUpdatedAt = data.updated_at || "";
+      const raw = localStorage.getItem(STORAGE_KEY);
 
-        const cloudCanonical = stableStringify(data.state);
-        const localCanonical = localState
-          ? stableStringify(localState)
-          : "";
+      if (!raw) {
+        await checkCloudChanges(user.id);
+      } else {
+        const state = parseState(raw);
 
-        if (cloudCanonical !== localCanonical) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data.state));
-          window.location.reload();
-          return;
+        if (state) {
+          const { data: existing } = await supabase
+            .from("app_state")
+            .select("data")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+          if (!existing?.data) {
+            await uploadLocalState(user.id);
+          } else {
+            const cloudValue = stableStringify(existing.data);
+            const localValue = stableStringify(state);
+
+            lastCloudValue = cloudValue;
+
+            if (cloudValue !== localValue) {
+              localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify(existing.data)
+              );
+
+              lastLocalValue = JSON.stringify(existing.data);
+
+              window.location.reload();
+              return;
+            }
+          }
         }
-      } else if (localRaw && localState) {
-        await uploadLocalState(localRaw);
       }
 
-      localTimer = setInterval(checkLocalChanges, LOCAL_POLL_MS);
-      cloudTimer = setInterval(checkCloudChanges, CLOUD_POLL_MS);
+      localTimer = setInterval(() => {
+        checkLocalChanges(user.id);
+      }, LOCAL_POLL_MS);
+
+      cloudTimer = setInterval(() => {
+        checkCloudChanges(user.id);
+      }, CLOUD_POLL_MS);
     };
 
-    start();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      start();
+    };
+
+    const setup = async () => {
+      await start();
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange(() => {
+        start();
+      });
+
+      unsubscribe = () => {
+        subscription.unsubscribe();
+      };
+
+      document.addEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+
+    setup();
 
     return () => {
       stopped = true;
 
-      if (localTimer) clearInterval(localTimer);
-      if (cloudTimer) clearInterval(cloudTimer);
+      stopTimers();
+
+      if (unsubscribe) {
+        unsubscribe();
+      }
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
     };
   }, []);
 
