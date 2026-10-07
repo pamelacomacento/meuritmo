@@ -321,7 +321,6 @@ export default function Home() {
     if (focusSecs === 0) setRunning(false);
   }, [focusSecs]);
 
-
   useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<{
@@ -2686,43 +2685,70 @@ function Ideas({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* RITMO: tarefas + hábitos no mesmo cálculo                           */
+/* ------------------------------------------------------------------ */
+
+type RhythmItem = { category: string; done: boolean };
+
+function collectRhythmItems(state: AppState, start: Date, end: Date): RhythmItem[] {
+  const startISO = iso(start);
+  const endISO = iso(end);
+  const items: RhythmItem[] = [];
+
+  // Tarefas (apenas kind === "task")
+  for (const t of state.tasks) {
+    if (t.kind !== "task") continue;
+    if (t.date >= startISO && t.date <= endISO) {
+      items.push({ category: t.category, done: t.done });
+    }
+  }
+
+  // Hábitos: cada ocorrência no período conta como 1 item
+  const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 12);
+  while (iso(cur) <= endISO) {
+    const ds = iso(cur);
+    for (const h of state.habits) {
+      if (!habitOccursOnDate(h, ds)) continue;
+      items.push({
+        category: h.category,
+        done: (h.logs[ds] || 0) >= h.goal, // só conta ao atingir a meta
+      });
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  return items;
+}
+
 function Rhythm({ state }: { state: AppState }) {
   const [period, setPeriod] = useState<"Semana" | "Mês" | "Ano">("Semana");
   const { start, end, prevStart, prevEnd } = periodRange(period);
 
-  const tasks = state.tasks.filter(
-    (t) => t.kind === "task" && between(t.date, start, end)
-  );
-  const done = tasks.filter((t) => t.done);
+  const items = collectRhythmItems(state, start, end);
+  const done = items.filter((i) => i.done);
 
-  const prevTasks = state.tasks.filter(
-    (t) => t.kind === "task" && between(t.date, prevStart, prevEnd)
-  );
-  const prevDone = prevTasks.filter((t) => t.done);
+  const prevItems = collectRhythmItems(state, prevStart, prevEnd);
+  const prevDone = prevItems.filter((i) => i.done);
 
-  const completion = tasks.length
-    ? Math.round((done.length / tasks.length) * 100)
+  const completion = items.length
+    ? Math.round((done.length / items.length) * 100)
     : 0;
 
-  const prevCompletion = prevTasks.length
-    ? Math.round((prevDone.length / prevTasks.length) * 100)
+  const prevCompletion = prevItems.length
+    ? Math.round((prevDone.length / prevItems.length) * 100)
     : 0;
 
   const delta = completion - prevCompletion;
 
   const byCat = state.categories.map((cat) => {
-    const catTasks = tasks.filter((t) => t.category === cat.name);
-    const catDone = catTasks.filter((t) => t.done);
-    const pct = catTasks.length
-      ? Math.round((catDone.length / catTasks.length) * 100)
+    const catItems = items.filter((i) => i.category === cat.name);
+    const catDone = catItems.filter((i) => i.done);
+    const pct = catItems.length
+      ? Math.round((catDone.length / catItems.length) * 100)
       : 0;
 
-    return {
-      c: cat.name,
-      total: catTasks.length,
-      done: catDone.length,
-      pct,
-    };
+    return { c: cat.name, total: catItems.length, done: catDone.length, pct };
   });
 
   return (
@@ -2748,13 +2774,11 @@ function Rhythm({ state }: { state: AppState }) {
         <div className="flex items-end justify-between gap-4">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#89919a]">
-              Tarefas concluídas
+              Tarefas e hábitos concluídos
             </div>
-            <div className="mt-1 text-3xl font-semibold">
-              {completion}%
-            </div>
+            <div className="mt-1 text-3xl font-semibold">{completion}%</div>
             <div className="mt-1 text-xs text-[#8b939b]">
-              {done.length} de {tasks.length} {tasks.length === 1 ? "tarefa" : "tarefas"}
+              {done.length} de {items.length} {items.length === 1 ? "item" : "itens"}
             </div>
           </div>
 
@@ -2763,7 +2787,7 @@ function Rhythm({ state }: { state: AppState }) {
               delta >= 0 ? "text-[#6F8F7C]" : "text-[#B96F60]"
             }`}
           >
-            {prevTasks.length ? (
+            {prevItems.length ? (
               <>
                 {delta >= 0 ? "+" : ""}
                 {delta} p.p. vs anterior
@@ -2775,12 +2799,7 @@ function Rhythm({ state }: { state: AppState }) {
         </div>
 
         <div className="mt-4 progressbar">
-          <div
-            style={{
-              width: `${completion}%`,
-              background: "var(--app-accent)",
-            }}
-          />
+          <div style={{ width: `${completion}%`, background: "var(--app-accent)" }} />
         </div>
       </section>
 
@@ -2793,7 +2812,7 @@ function Rhythm({ state }: { state: AppState }) {
               <div className="mb-1 flex justify-between gap-3 text-xs">
                 <span className="font-semibold">{x.c}</span>
                 <span className="text-[#8b939b]">
-                  {x.total ? `${x.done}/${x.total} · ${x.pct}%` : "Sem tarefas"}
+                  {x.total ? `${x.done}/${x.total} · ${x.pct}%` : "Sem itens"}
                 </span>
               </div>
 
@@ -2810,7 +2829,7 @@ function Rhythm({ state }: { state: AppState }) {
         </div>
       </section>
 
-      <PeriodInsight period={period} state={state} tasks={tasks} />
+      <PeriodInsight period={period} state={state} items={items} />
     </div>
   );
 }
@@ -2845,26 +2864,18 @@ function periodRange(p: "Semana" | "Mês" | "Ano") {
 function PeriodInsight({
   period,
   state,
-  tasks,
+  items,
 }: {
   period: string;
   state: AppState;
-  tasks: Task[];
+  items: RhythmItem[];
 }) {
   const grouped = state.categories
     .map((cat) => {
-      const catTasks = tasks.filter((t) => t.category === cat.name);
-      const done = catTasks.filter((t) => t.done).length;
-      const pct = catTasks.length
-        ? Math.round((done / catTasks.length) * 100)
-        : 0;
-
-      return {
-        c: cat.name,
-        total: catTasks.length,
-        done,
-        pct,
-      };
+      const catItems = items.filter((i) => i.category === cat.name);
+      const done = catItems.filter((i) => i.done).length;
+      const pct = catItems.length ? Math.round((done / catItems.length) * 100) : 0;
+      return { c: cat.name, total: catItems.length, done, pct };
     })
     .filter((x) => x.total > 0)
     .sort((a, b) => b.pct - a.pct || b.done - a.done);
@@ -2884,25 +2895,27 @@ function PeriodInsight({
         {label}
       </div>
 
-      {tasks.length ? (
+      {items.length ? (
         <p className="mt-2 text-sm leading-5">
           {high ? (
             <>
               Sua maior taxa de conclusão foi em <strong>{high.c}</strong>, com{" "}
-              <strong>{high.pct}%</strong> das tarefas concluídas.
+              <strong>{high.pct}%</strong> dos itens concluídos.
             </>
           ) : (
-            <>Você já tem tarefas neste período. Vá marcando conforme concluir.</>
+            <>Você já tem itens neste período. Vá marcando conforme concluir.</>
           )}
         </p>
       ) : (
         <p className="mt-2 text-sm leading-5 text-[#7e8790]">
-          Ainda não há tarefas neste período para calcular seu ritmo.
+          Ainda não há tarefas ou hábitos neste período para calcular seu ritmo.
         </p>
       )}
     </section>
   );
 }
+
+/* ------------------------------------------------------------------ */
 
 function Profile({
   state,
@@ -3414,57 +3427,58 @@ function TaskComposer({
         </div>
 
         {kind !== "birthday" && (
-        <div className="mt-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-xs font-bold">Duração</div>
-            <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#a1a7ad]">Opcional</div>
-          </div>
-          <div className="grid grid-cols-[1fr_120px] gap-2">
-            <input
-              type="number"
-              min="0"
-              step={durationUnit === "h" ? "0.5" : "5"}
-              value={durationValue}
-              onChange={(e) =>
-                setDurationValue(e.target.value === "" ? 0 : Number(e.target.value))
-              }
-              className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
-            />
-            <select
-              value={durationUnit}
-              onChange={(e) => setDurationUnit(e.target.value as "min" | "h")}
-              className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
-            >
-              <option value="min">minutos</option>
-              <option value="h">horas</option>
-            </select>
-          </div>
-
-          <div className="mt-2 grid grid-cols-4 gap-1.5">
-            {[
-              { label: "15 min", m: 15 },
-              { label: "30 min", m: 30 },
-              { label: "1h", m: 60 },
-              { label: "2h", m: 120 },
-            ].map((x) => (
-              <button
-                key={x.m}
-                onClick={() => {
-                  if (x.m >= 60) {
-                    setDurationUnit("h");
-                    setDurationValue(x.m / 60);
-                  } else {
-                    setDurationUnit("min");
-                    setDurationValue(x.m);
-                  }
-                }}
-                className="rounded-xl border border-[#E8D9CC] bg-white px-2 py-2 text-[11px] font-bold"
+          <div className="mt-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-xs font-bold">Duração</div>
+              <div className="text-[9px] font-bold uppercase tracking-[.12em] text-[#a1a7ad]">Opcional</div>
+            </div>
+            <div className="grid grid-cols-[1fr_120px] gap-2">
+              <input
+                type="number"
+                min="0"
+                step={durationUnit === "h" ? "0.5" : "5"}
+                value={durationValue}
+                onChange={(e) =>
+                  setDurationValue(e.target.value === "" ? 0 : Number(e.target.value))
+                }
+                className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
+              />
+              <select
+                value={durationUnit}
+                onChange={(e) => setDurationUnit(e.target.value as "min" | "h")}
+                className="w-full rounded-xl border border-[#E8D9CC] bg-white px-3 py-2 text-sm"
               >
-                {x.label}
-              </button>
-            ))}
+                <option value="min">minutos</option>
+                <option value="h">horas</option>
+              </select>
+            </div>
+
+            <div className="mt-2 grid grid-cols-4 gap-1.5">
+              {[
+                { label: "15 min", m: 15 },
+                { label: "30 min", m: 30 },
+                { label: "1h", m: 60 },
+                { label: "2h", m: 120 },
+              ].map((x) => (
+                <button
+                  key={x.m}
+                  onClick={() => {
+                    if (x.m >= 60) {
+                      setDurationUnit("h");
+                      setDurationValue(x.m / 60);
+                    } else {
+                      setDurationUnit("min");
+                      setDurationValue(x.m);
+                    }
+                  }}
+                  className="rounded-xl border border-[#E8D9CC] bg-white px-2 py-2 text-[11px] font-bold"
+                >
+                  {x.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>        )}
+        )}
 
         <div className="mt-3">
           <div className="mb-2 flex items-center justify-between gap-2">
