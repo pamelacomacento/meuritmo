@@ -268,6 +268,13 @@ function migrateState(raw: any): AppState {
   };
 }
 
+const hasRealUserData = (value: AppState | null) =>
+  !!value &&
+  (value.tasks.length > 0 ||
+    value.habits.length > 0 ||
+    value.ideas.length > 0 ||
+    value.countdowns.length > 0);
+
 export default function Home() {
   const [state, setState] = useState<AppState>(seed);
   const [tab, setTab] = useState<MainTab>("Hoje");
@@ -325,18 +332,22 @@ export default function Home() {
 
       if (cancelled) return;
 
-      if (!error && cloudRow?.data) {
-        const cloudState = migrateState(cloudRow.data);
+      const cloudState =
+        !error && cloudRow?.data ? migrateState(cloudRow.data) : null;
+
+      if (hasRealUserData(cloudState)) {
         setState(cloudState);
         stateRef.current = cloudState;
         localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(cloudState));
-        lastCloudUpdatedAtRef.current = cloudRow.updated_at || null;
-      } else if (!error && localState) {
+        lastCloudUpdatedAtRef.current = cloudRow?.updated_at || null;
+      } else if (hasRealUserData(localState)) {
         setState(localState);
         stateRef.current = localState;
-      } else if (!localState) {
+        lastCloudUpdatedAtRef.current = cloudRow?.updated_at || null;
+      } else {
         setState(seed);
         stateRef.current = seed;
+        lastCloudUpdatedAtRef.current = cloudRow?.updated_at || null;
       }
 
       cloudReadyRef.current = !error;
@@ -358,7 +369,7 @@ export default function Home() {
     localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(state));
 
     const userId = cloudUserIdRef.current;
-    if (!cloudReadyRef.current || !userId) return;
+    if (!cloudReadyRef.current || !userId || !hasRealUserData(state)) return;
 
     if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
 
@@ -406,11 +417,13 @@ export default function Home() {
 
       if (error || !data?.data) return;
 
+      const cloudState = migrateState(data.data);
+
       if (
         data.updated_at &&
-        data.updated_at !== lastCloudUpdatedAtRef.current
+        data.updated_at !== lastCloudUpdatedAtRef.current &&
+        hasRealUserData(cloudState)
       ) {
-        const cloudState = migrateState(data.data);
         const localState = stateRef.current;
 
         if (JSON.stringify(cloudState) !== JSON.stringify(localState)) {
