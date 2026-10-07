@@ -106,20 +106,20 @@ export default function CloudSync() {
 
       if (stopped) return;
 
-      // If the phone/PWA has no local data and the cloud has the user's
-      // saved data, restore it locally.
-      if (cloudState && hasRealUserData(cloudState)) {
-        if (!hasRealUserData(localState) || stableStringify(localState) !== stableStringify(cloudState)) {
-          applyCloudState(cloudState);
+      // A device that already has real data is the source of truth.
+      // This is especially important on the computer, where the existing
+      // data may be the first copy that needs to seed the cloud.
+      if (hasRealUserData(localState)) {
+        if (!cloudState || stableStringify(localState) !== stableStringify(cloudState)) {
+          await saveLocalToCloud(userId, localState);
         }
         return;
       }
 
-      // If the cloud row exists but contains an empty/initial state, never
-      // overwrite a device that already has real data. Send the real local
-      // data to the cloud instead.
-      if (hasRealUserData(localState)) {
-        await saveLocalToCloud(userId, localState);
+      // A device with no local data, such as a newly installed PWA, restores
+      // the user's saved state from the cloud.
+      if (cloudState && hasRealUserData(cloudState)) {
+        applyCloudState(cloudState);
       }
     };
 
