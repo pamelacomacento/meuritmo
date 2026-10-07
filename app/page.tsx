@@ -335,7 +335,7 @@ export default function Home() {
       const cloudState =
         !error && cloudRow?.data ? migrateState(cloudRow.data) : null;
 
-      if (hasRealUserData(cloudState)) {
+      if (cloudState && hasRealUserData(cloudState)) {
         setState(cloudState);
         stateRef.current = cloudState;
         localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(cloudState));
