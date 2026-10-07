@@ -99,13 +99,19 @@ export default function LoginPage() {
                 className="h-14 w-14 rounded-2xl shadow-sm"
               />
               <div>
-                <div className="text-xl font-semibold tracking-tight">Agendinha</div>
-                <div className="mt-0.5 text-[11px] font-medium text-[#87909a]">Sua rotina mais leve</div>
+                <div className="text-xl font-semibold tracking-tight">
+                  Agendinha
+                </div>
+                <div className="mt-0.5 text-[11px] font-medium text-[#87909a]">
+                  Sua rotina mais leve
+                </div>
               </div>
             </div>
+
             <h1 className="text-3xl font-semibold tracking-tight">
               {mode === "login" ? "Entrar" : "Criar sua conta"}
             </h1>
+
             <p className="mt-2 text-sm leading-6 text-[#7e8790]">
               {mode === "login"
                 ? "Use a mesma conta no celular e no computador."
@@ -116,6 +122,7 @@ export default function LoginPage() {
           <form onSubmit={submit} className="space-y-4">
             <label className="block">
               <span className="mb-2 block text-xs font-bold">E-mail</span>
+
               <input
                 type="email"
                 autoComplete="email"
@@ -128,15 +135,29 @@ export default function LoginPage() {
 
             <label className="block">
               <span className="mb-2 block text-xs font-bold">Senha</span>
+
               <input
                 type="password"
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Mínimo de 6 caracteres"
                 className="w-full rounded-2xl border border-[#ddd7cf] bg-white px-4 py-3 text-base outline-none focus:border-[#24364b]"
               />
             </label>
+
+            {mode === "login" && (
+              <div className="text-right">
+                <a
+                  href="/forgot-password"
+                  className="text-xs font-semibold text-[#53677d] hover:underline"
+                >
+                  Esqueci minha senha
+                </a>
+              </div>
+            )}
 
             {error && (
               <div className="rounded-2xl bg-[#f7e9e5] px-4 py-3 text-sm text-[#9b5f54]">
