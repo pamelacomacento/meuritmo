@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ensureAnonymousUser, signOutUser } from "../lib/auth";
 import { registerPushSubscription } from "../lib/push";
 import { supabase } from "../lib/supabase";
-import CloudSync from "./cloud-sync";
 
 type MainTab = "Hoje" | "Calendário" | "Hábitos" | "Mais";
 type MoreTab = "Ritmo" | "Tarefas" | "Eisenhower" | "Foco" | "Contagens" | "Ideias" | "Perfil";
@@ -288,23 +287,148 @@ export default function Home() {
   const [focusSecs, setFocusSecs] = useState(0);
   const [running, setRunning] = useState(false);
 
+  const cloudUserIdRef = useRef<string | null>(null);
+  const cloudReadyRef = useRef(false);
+  const cloudSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cloudPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stateRef = useRef(state);
+  const lastCloudUpdatedAtRef = useRef<string | null>(null);
+  const cloudWriteRef = useRef(false);
+
   useEffect(() => {
-    ensureAnonymousUser();
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccountData = async () => {
+      const user = await ensureAnonymousUser();
+      if (!user || cancelled) return;
+
+      cloudUserIdRef.current = user.id;
+
+      const localRaw = localStorage.getItem("meu-ritmo-v2.3");
+      let localState: AppState | null = null;
+
+      if (localRaw) {
+        try {
+          localState = migrateState(JSON.parse(localRaw));
+        } catch {}
+      }
+
+      const { data: cloudRow, error } = await supabase
+        .from("app_state")
+        .select("data, updated_at")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (!error && cloudRow?.data) {
+        const cloudState = migrateState(cloudRow.data);
+        setState(cloudState);
+        stateRef.current = cloudState;
+        localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(cloudState));
+        lastCloudUpdatedAtRef.current = cloudRow.updated_at || null;
+      } else if (!error && localState) {
+        setState(localState);
+        stateRef.current = localState;
+      } else if (!localState) {
+        setState(seed);
+        stateRef.current = seed;
+      }
+
+      cloudReadyRef.current = !error;
+      setHydrated(true);
+    };
+
+    loadAccountData();
+
+    return () => {
+      cancelled = true;
+      if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+      if (cloudPollingRef.current) clearInterval(cloudPollingRef.current);
+    };
   }, []);
 
   useEffect(() => {
-    const raw = localStorage.getItem("meu-ritmo-v2.3");
-    if (raw) {
-      try {
-        setState(migrateState(JSON.parse(raw)));
-      } catch {}
-    }
-    setHydrated(true);
-  }, []);
+    if (!hydrated) return;
 
-  useEffect(() => {
-    if (hydrated) localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(state));
+    localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(state));
+
+    const userId = cloudUserIdRef.current;
+    if (!cloudReadyRef.current || !userId) return;
+
+    if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+
+    cloudSaveTimerRef.current = setTimeout(async () => {
+      cloudWriteRef.current = true;
+
+      const updatedAt = new Date().toISOString();
+      const { error } = await supabase
+        .from("app_state")
+        .upsert(
+          {
+            user_id: userId,
+            data: stateRef.current,
+            updated_at: updatedAt,
+          },
+          { onConflict: "user_id" }
+        );
+
+      if (!error) {
+        lastCloudUpdatedAtRef.current = updatedAt;
+      }
+
+      cloudWriteRef.current = false;
+    }, 500);
+
+    return () => {
+      if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+    };
   }, [state, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !cloudReadyRef.current || !cloudUserIdRef.current) return;
+
+    const checkCloud = async () => {
+      if (cloudWriteRef.current) return;
+
+      const userId = cloudUserIdRef.current;
+      if (!userId) return;
+
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("data, updated_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (error || !data?.data) return;
+
+      if (
+        data.updated_at &&
+        data.updated_at !== lastCloudUpdatedAtRef.current
+      ) {
+        const cloudState = migrateState(data.data);
+        const localState = stateRef.current;
+
+        if (JSON.stringify(cloudState) !== JSON.stringify(localState)) {
+          stateRef.current = cloudState;
+          setState(cloudState);
+          localStorage.setItem("meu-ritmo-v2.3", JSON.stringify(cloudState));
+        }
+
+        lastCloudUpdatedAtRef.current = data.updated_at;
+      }
+    };
+
+    cloudPollingRef.current = setInterval(checkCloud, 5000);
+    return () => {
+      if (cloudPollingRef.current) clearInterval(cloudPollingRef.current);
+    };
+  }, [hydrated]);
+
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -466,7 +590,6 @@ export default function Home() {
 
   return (
    <>
-      <CloudSync />
       <main className="min-h-screen px-3 py-4 sm:py-8">
       <div
         className="phone-shell mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-[440px] flex-col overflow-hidden rounded-[34px] border border-white/80 bg-[#FFFAF4] sm:min-h-[820px]"
