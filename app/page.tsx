@@ -464,7 +464,9 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen px-3 py-4 sm:py-8">
+   <>
+      <CloudSync />
+      <main className="min-h-screen px-3 py-4 sm:py-8">
       <div
         className="phone-shell mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-[440px] flex-col overflow-hidden rounded-[34px] border border-white/80 bg-[#FFFAF4] sm:min-h-[820px]"
         style={{ "--app-accent": state.accent } as React.CSSProperties}
@@ -646,7 +648,8 @@ export default function Home() {
           }}
         />
       )}
-    </main>
+      </main>
+    </>
   );
 }
 
@@ -4194,7 +4197,7 @@ function SectionTitle({
   const emoji = titleEmoji[title];
 
   return (
-    <div className="mb-5 flex items-start justify-between gap-3">
+      <div className="mb-5 flex items-start justify-between gap-3">
       <div>
         <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/85 px-3 py-1 text-[10px] font-bold uppercase tracking-[.14em] text-[#8a93a0] shadow-sm ring-1 ring-[#EADCCF]">
           <span>{emoji || "✦"}</span>
