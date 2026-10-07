@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ensureAnonymousUser, signOutUser } from "../lib/auth";
 import { registerPushSubscription } from "../lib/push";
 import { supabase } from "../lib/supabase";
