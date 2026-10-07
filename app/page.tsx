@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import { ensureAnonymousUser, signOutUser } from "../lib/auth";
 import { registerPushSubscription } from "../lib/push";
 import { supabase } from "../lib/supabase";
+import CloudSync from "./cloud-sync";
 
 type MainTab = "Hoje" | "Calendário" | "Hábitos" | "Mais";
 type MoreTab = "Ritmo" | "Tarefas" | "Eisenhower" | "Foco" | "Contagens" | "Ideias" | "Perfil";
