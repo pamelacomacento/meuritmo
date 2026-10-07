@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ensureAnonymousUser } from "../lib/auth";
+import { ensureAnonymousUser, signOutUser } from "../lib/auth";
 import { registerPushSubscription } from "../lib/push";
 import { supabase } from "../lib/supabase";
 
@@ -3236,21 +3236,19 @@ function Profile({
         </p>
       </section>
 
-      <section className="soft-card mt-4 p-4">
-        <div className="text-sm font-semibold">Sobre seus dados</div>
-        <p className="mt-2 text-xs leading-5 text-[#7e8790]">
-          Seus dados são sincronizados com sua conta e também ficam salvos localmente neste aparelho.
-        </p>
-        <button
-          onClick={() => {
-            localStorage.removeItem("meu-ritmo-v2.3");
-            location.reload();
-          }}
-          className="mt-4 text-xs font-bold text-[#A96E62]"
-        >
-          Limpar todos os dados
-        </button>
-      </section>
+    <section className="soft-card mt-4 p-4">
+  <div className="text-sm font-semibold">Conta</div>
+  <p className="mt-2 text-xs leading-5 text-[#7e8790]">
+    Está usando outra conta ou quer testar a recuperação de senha?
+  </p>
+
+  <button
+    onClick={signOutUser}
+    className="mt-4 w-full rounded-xl border border-[#E8D9CC] bg-white px-4 py-3 text-xs font-bold text-[#A96E62]"
+  >
+    Sair da conta
+  </button>
+</section>
     </div>
   );
 }
