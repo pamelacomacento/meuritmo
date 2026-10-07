@@ -4,38 +4,12 @@ import { useEffect } from "react";
 import { supabase } from "../lib/supabase";
 
 const STORAGE_KEY = "meu-ritmo-v2.3";
-
-const LOCAL_POLL_MS = 1000;
-const CLOUD_POLL_MS = 5000;
 const SESSION_RETRY_MS = 1000;
-const SESSION_RETRY_LIMIT = 15;
-
-function stableValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stableValue);
-  }
-
-  if (value && typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>)
-      .sort()
-      .reduce<Record<string, unknown>>((result, key) => {
-        result[key] = stableValue(
-          (value as Record<string, unknown>)[key]
-        );
-        return result;
-      }, {});
-  }
-
-  return value;
-}
-
-function stableStringify(value: unknown) {
-  return JSON.stringify(stableValue(value));
-}
+const SESSION_RETRY_LIMIT = 30;
+const CLOUD_POLL_MS = 5000;
 
 function parseState(raw: string | null) {
   if (!raw) return null;
-
   try {
     return JSON.parse(raw);
   } catch {
@@ -43,138 +17,100 @@ function parseState(raw: string | null) {
   }
 }
 
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((result, key) => {
+        result[key] = stableValue((value as Record<string, unknown>)[key]);
+        return result;
+      }, {});
+  }
+  return value;
+}
+
+function stableStringify(value: unknown) {
+  return JSON.stringify(stableValue(value));
+}
+
+function hasRealUserData(state: any) {
+  return Boolean(
+    state &&
+      ((Array.isArray(state.tasks) && state.tasks.length) ||
+        (Array.isArray(state.habits) && state.habits.length) ||
+        (Array.isArray(state.ideas) && state.ideas.length) ||
+        (Array.isArray(state.countdowns) && state.countdowns.length))
+  );
+}
+
 export default function CloudSync() {
   useEffect(() => {
     let stopped = false;
-    let localTimer: ReturnType<typeof setInterval> | null = null;
-    let cloudTimer: ReturnType<typeof setInterval> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let unsubscribe: (() => void) | null = null;
+    let cloudTimer: ReturnType<typeof setInterval> | null = null;
+    let startedUserId: string | null = null;
 
-    let lastLocalValue =
-      typeof window !== "undefined"
-        ? localStorage.getItem(STORAGE_KEY)
-        : null;
-
-    let lastCloudValue: string | null = null;
-
-    const stopTimers = () => {
-      if (localTimer) {
-        clearInterval(localTimer);
-        localTimer = null;
-      }
-
-      if (cloudTimer) {
-        clearInterval(cloudTimer);
-        cloudTimer = null;
-      }
-
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-      }
-    };
-
-    const uploadLocalState = async (userId: string) => {
-      if (stopped) return;
-
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-
-      const state = parseState(raw);
-      if (!state) return;
-
-      const { error } = await supabase
-        .from("app_state")
-        .upsert(
-          {
-            user_id: userId,
-            data: state,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "user_id",
-          }
-        );
-
-      if (!error) {
-        lastLocalValue = raw;
-      }
-    };
-
-    const checkLocalChanges = async (userId: string) => {
-      if (stopped) return;
-
-      const raw = localStorage.getItem(STORAGE_KEY);
-
-      if (!raw || raw === lastLocalValue) {
-        return;
-      }
-
-      const state = parseState(raw);
-
-      if (!state) return;
-
-      const { error } = await supabase
-        .from("app_state")
-        .upsert(
-          {
-            user_id: userId,
-            data: state,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "user_id",
-          }
-        );
-
-      if (!error) {
-        lastLocalValue = raw;
-        lastCloudValue = stableStringify(state);
-      }
-    };
-
-    const checkCloudChanges = async (userId: string) => {
-      if (stopped) return;
-
+    const loadCloudState = async (userId: string) => {
+      if (stopped) return null;
       const { data, error } = await supabase
         .from("app_state")
         .select("data, updated_at")
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (error || !data?.data) {
-        return;
+      if (error) {
+        console.error("[Agendinha] erro ao ler app_state:", error);
+        return null;
       }
 
-      const cloudValue = stableStringify(data.data);
+      return data?.data ?? null;
+    };
 
-      if (cloudValue === lastCloudValue) {
-        return;
+    const saveLocalToCloud = async (userId: string, state: any) => {
+      if (stopped || !state) return;
+      const { error } = await supabase
+        .from("app_state")
+        .upsert(
+          {
+            user_id: userId,
+            data: state,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
+
+      if (error) {
+        console.error("[Agendinha] erro ao salvar app_state:", error);
       }
+    };
 
-      lastCloudValue = cloudValue;
+    const applyCloudState = (cloudState: any) => {
+      if (!cloudState || stopped) return;
 
-      const localRaw = localStorage.getItem(STORAGE_KEY);
-      const localState = parseState(localRaw);
+      const cloudRaw = JSON.stringify(cloudState);
+      const localState = parseState(localStorage.getItem(STORAGE_KEY));
 
-      const localValue = localState
-        ? stableStringify(localState)
-        : null;
+      if (stableStringify(localState) === stableStringify(cloudState)) return;
 
-      if (localValue === cloudValue) {
-        lastLocalValue = localRaw;
-        return;
-      }
-
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(data.data)
-      );
-
-      lastLocalValue = JSON.stringify(data.data);
-
+      localStorage.setItem(STORAGE_KEY, cloudRaw);
+      window.dispatchEvent(new CustomEvent("meu-ritmo-cloud-loaded"));
       window.location.reload();
+    };
+
+    const sync = async (userId: string) => {
+      const cloudState = await loadCloudState(userId);
+      if (stopped) return;
+
+      if (cloudState) {
+        applyCloudState(cloudState);
+        return;
+      }
+
+      const localState = parseState(localStorage.getItem(STORAGE_KEY));
+      if (hasRealUserData(localState)) {
+        await saveLocalToCloud(userId, localState);
+      }
     };
 
     const start = async (attempt = 0) => {
@@ -184,116 +120,49 @@ export default function CloudSync() {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (!session) {
+      if (!session || session.user.is_anonymous) {
         if (attempt < SESSION_RETRY_LIMIT) {
-          retryTimer = setTimeout(() => {
-            start(attempt + 1);
-          }, SESSION_RETRY_MS);
+          retryTimer = setTimeout(() => start(attempt + 1), SESSION_RETRY_MS);
         }
-
         return;
       }
 
-      const user = session.user;
+      const userId = session.user.id;
 
-      if (user.is_anonymous) {
-        return;
+      if (startedUserId === userId && cloudTimer) return;
+      startedUserId = userId;
+
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
       }
 
-      stopTimers();
-
-      await checkCloudChanges(user.id);
-
+      await sync(userId);
       if (stopped) return;
 
-      const raw = localStorage.getItem(STORAGE_KEY);
-
-      if (!raw) {
-        await checkCloudChanges(user.id);
-      } else {
-        const state = parseState(raw);
-
-        if (state) {
-          const { data: existing } = await supabase
-            .from("app_state")
-            .select("data")
-            .eq("user_id", user.id)
-            .maybeSingle();
-
-          if (!existing?.data) {
-            await uploadLocalState(user.id);
-          } else {
-            const cloudValue = stableStringify(existing.data);
-            const localValue = stableStringify(state);
-
-            lastCloudValue = cloudValue;
-
-            if (cloudValue !== localValue) {
-              localStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify(existing.data)
-              );
-
-              lastLocalValue = JSON.stringify(existing.data);
-
-              window.location.reload();
-              return;
-            }
-          }
-        }
-      }
-
-      localTimer = setInterval(() => {
-        checkLocalChanges(user.id);
-      }, LOCAL_POLL_MS);
-
-      cloudTimer = setInterval(() => {
-        checkCloudChanges(user.id);
-      }, CLOUD_POLL_MS);
+      cloudTimer = setInterval(() => sync(userId), CLOUD_POLL_MS);
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
-        return;
-      }
-
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
       start();
+    });
+
+    start();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") start();
     };
 
-    const setup = async () => {
-      await start();
-
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange(() => {
-        start();
-      });
-
-      unsubscribe = () => {
-        subscription.unsubscribe();
-      };
-
-      document.addEventListener(
-        "visibilitychange",
-        handleVisibilityChange
-      );
-    };
-
-    setup();
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       stopped = true;
-
-      stopTimers();
-
-      if (unsubscribe) {
-        unsubscribe();
-      }
-
-      document.removeEventListener(
-        "visibilitychange",
-        handleVisibilityChange
-      );
+      if (retryTimer) clearTimeout(retryTimer);
+      if (cloudTimer) clearInterval(cloudTimer);
+      subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
 
