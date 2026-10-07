@@ -53,6 +53,7 @@ export default function CloudSync() {
 
     const loadCloudState = async (userId: string) => {
       if (stopped) return null;
+
       const { data, error } = await supabase
         .from("app_state")
         .select("data, updated_at")
@@ -69,6 +70,7 @@ export default function CloudSync() {
 
     const saveLocalToCloud = async (userId: string, state: any) => {
       if (stopped || !state) return;
+
       const { error } = await supabase
         .from("app_state")
         .upsert(
@@ -99,15 +101,23 @@ export default function CloudSync() {
     };
 
     const sync = async (userId: string) => {
+      const localState = parseState(localStorage.getItem(STORAGE_KEY));
       const cloudState = await loadCloudState(userId);
+
       if (stopped) return;
 
-      if (cloudState) {
-        applyCloudState(cloudState);
+      // If the phone/PWA has no local data and the cloud has the user's
+      // saved data, restore it locally.
+      if (cloudState && hasRealUserData(cloudState)) {
+        if (!hasRealUserData(localState) || stableStringify(localState) !== stableStringify(cloudState)) {
+          applyCloudState(cloudState);
+        }
         return;
       }
 
-      const localState = parseState(localStorage.getItem(STORAGE_KEY));
+      // If the cloud row exists but contains an empty/initial state, never
+      // overwrite a device that already has real data. Send the real local
+      // data to the cloud instead.
       if (hasRealUserData(localState)) {
         await saveLocalToCloud(userId, localState);
       }
