@@ -106,9 +106,6 @@ export default function CloudSync() {
 
       if (stopped) return;
 
-      // A device that already has real data is the source of truth.
-      // This is especially important on the computer, where the existing
-      // data may be the first copy that needs to seed the cloud.
       if (hasRealUserData(localState)) {
         if (!cloudState || stableStringify(localState) !== stableStringify(cloudState)) {
           await saveLocalToCloud(userId, localState);
@@ -116,8 +113,6 @@ export default function CloudSync() {
         return;
       }
 
-      // A device with no local data, such as a newly installed PWA, restores
-      // the user's saved state from the cloud.
       if (cloudState && hasRealUserData(cloudState)) {
         applyCloudState(cloudState);
       }
@@ -126,9 +121,16 @@ export default function CloudSync() {
     const start = async (attempt = 0) => {
       if (stopped) return;
 
-      const {
+      let {
         data: { session },
       } = await supabase.auth.getSession();
+
+      // In an installed PWA the auth session can take a moment to be
+      // restored. Force a refresh before giving up on synchronization.
+      if (!session) {
+        const refreshed = await supabase.auth.refreshSession();
+        session = refreshed.data.session ?? null;
+      }
 
       if (!session || session.user.is_anonymous) {
         if (attempt < SESSION_RETRY_LIMIT) {
